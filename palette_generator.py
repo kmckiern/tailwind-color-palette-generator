@@ -1,7 +1,7 @@
 import colorsys
-from typing import Dict, Tuple
+import math
+from typing import Dict, List, Tuple
 
-import numpy as np
 import pyperclip
 import streamlit as st
 
@@ -17,8 +17,13 @@ def rgb_to_hex(rgb: Tuple[int, int, int]) -> str:
     return "#{:02x}{:02x}{:02x}".format(rgb[0], rgb[1], rgb[2])
 
 
+def linspace(start: float, stop: float, num: int) -> List[float]:
+    step = (stop - start) / (num - 1)
+    return [start + i * step for i in range(num)]
+
+
 def custom_sigmoid(x: float, steepness: float) -> float:
-    return 1 / (1 + np.exp(-steepness * (x - 0.5)))
+    return 1 / (1 + math.exp(-steepness * (x - 0.5)))
 
 
 def normalize_sigmoid(x: float, steepness: float) -> float:
@@ -81,7 +86,7 @@ def main():
         key="steepness",
     )
 
-    x = np.linspace(start=0, stop=1, num=100)
+    x = linspace(start=0, stop=1, num=100)
     y = [normalize_sigmoid(x=i, steepness=steepness) for i in x]
     st.line_chart(data={"Curve": y})
 
