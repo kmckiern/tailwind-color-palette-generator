@@ -5,6 +5,8 @@ import numpy as np
 import pyperclip
 import streamlit as st
 
+TAILWIND_SHADES = [50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 950]
+
 
 def hex_to_rgb(hex_color: str) -> Tuple[int, int, int]:
     hex_color = hex_color.lstrip("#")
@@ -44,10 +46,9 @@ def interpolate_color(color1: str, color2: str, factor: float, steepness: float)
 def generate_palette(
     start_color: str, end_color: str, steepness: float
 ) -> Dict[int, str]:
-    shades = [50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 950]
     palette = {}
-    for i, shade in enumerate(shades):
-        factor = i / (len(shades) - 1)
+    for i, shade in enumerate(TAILWIND_SHADES):
+        factor = i / (len(TAILWIND_SHADES) - 1)
         palette[shade] = interpolate_color(
             color1=start_color, color2=end_color, factor=factor, steepness=steepness
         )
@@ -84,24 +85,26 @@ def main():
     y = [normalize_sigmoid(x=i, steepness=steepness) for i in x]
     st.line_chart(data={"Curve": y})
 
+    palette = None
     with st.spinner("Generating palette..."):
         palette = generate_palette(
             start_color=start_color, end_color=end_color, steepness=steepness
         )
 
-    st.subheader("Palette")
-    cols = st.columns(11)
-    for (shade, color), col in zip(palette.items(), cols):
-        col.color_picker(
-            label=f"{shade}", value=color, key=f"color_{shade}", disabled=True
-        )
+    if palette:
+        st.subheader("Palette")
+        cols = st.columns(len(palette))
+        for (shade, color), col in zip(palette.items(), cols):
+            col.color_picker(
+                label=f"{shade}", value=color, key=f"color_{shade}", disabled=True
+            )
 
-    ts_object = palette_to_typescript(palette=palette)
-    st.code(body=ts_object, language="typescript")
+        ts_object = palette_to_typescript(palette=palette)
+        st.code(body=ts_object, language="typescript")
 
-    if st.button(label="Copy"):
-        pyperclip.copy(ts_object)
-        st.success("Copied to clipboard!")
+        if st.button(label="Copy"):
+            pyperclip.copy(ts_object)
+            st.success("Copied to clipboard!")
 
 
 if __name__ == "__main__":
