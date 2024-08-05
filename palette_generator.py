@@ -1,11 +1,17 @@
 import colorsys
 import math
-from typing import Dict, List, Tuple
+from typing import Dict, List, NamedTuple, Tuple
 
 import pyperclip
 import streamlit as st
 
 TAILWIND_SHADES = [50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 950]
+
+
+class PaletteParams(NamedTuple):
+    start_color: str
+    end_color: str
+    steepness: float
 
 
 def hex_to_rgb(hex_color: str) -> Tuple[int, int, int]:
@@ -48,14 +54,15 @@ def interpolate_color(color1: str, color2: str, factor: float, steepness: float)
     return rgb_to_hex(rgb=tuple(int(x * 255) for x in rgb))
 
 
-def generate_palette(
-    start_color: str, end_color: str, steepness: float
-) -> Dict[int, str]:
+def generate_palette(params: PaletteParams) -> Dict[int, str]:
     palette = {}
     for i, shade in enumerate(TAILWIND_SHADES):
         factor = i / (len(TAILWIND_SHADES) - 1)
         palette[shade] = interpolate_color(
-            color1=start_color, color2=end_color, factor=factor, steepness=steepness
+            color1=params.start_color,
+            color2=params.end_color,
+            factor=factor,
+            steepness=params.steepness,
         )
     return palette
 
@@ -68,15 +75,12 @@ def palette_to_typescript_color_array_str(palette: Dict[int, str]) -> str:
     return ts_color_array_str
 
 
-def main():
-    st.title("Tailwind Color Palette Generator")
-
+def palette_parameter_component() -> PaletteParams:
     st.subheader("Parameters")
     start_color = st.color_picker(
         label="Start color", value="#FFFFFF", key="start_color"
     )
     end_color = st.color_picker(label="End color", value="#000000", key="end_color")
-
     steepness = st.slider(
         label="Interpolation Curve Steepness",
         min_value=1.0,
@@ -90,26 +94,38 @@ def main():
     y = [normalize_sigmoid(x=i, steepness=steepness) for i in x]
     st.line_chart(data={"Curve": y})
 
-    palette = None
-    with st.spinner("Generating palette..."):
-        palette = generate_palette(
-            start_color=start_color, end_color=end_color, steepness=steepness
+    return PaletteParams(
+        start_color=start_color, end_color=end_color, steepness=steepness
+    )
+
+
+def palette_component(palette: Dict[int, str]) -> None:
+    st.subheader("Palette")
+    cols = st.columns(len(palette))
+    for (shade, color), col in zip(palette.items(), cols):
+        col.color_picker(
+            label=f"{shade}", value=color, key=f"color_{shade}", disabled=True
         )
 
+    ts_color_array_str = palette_to_typescript_color_array_str(palette=palette)
+    st.code(body=ts_color_array_str, language="typescript")
+
+    if st.button(label="Copy"):
+        pyperclip.copy(ts_color_array_str)
+        st.success("Copied to clipboard!")
+
+
+def main() -> None:
+    st.title("Tailwind Color Palette Generator")
+
+    params = palette_parameter_component()
+
+    palette = None
+    with st.spinner("Generating palette..."):
+        palette = generate_palette(params=params)
+
     if palette:
-        st.subheader("Palette")
-        cols = st.columns(len(palette))
-        for (shade, color), col in zip(palette.items(), cols):
-            col.color_picker(
-                label=f"{shade}", value=color, key=f"color_{shade}", disabled=True
-            )
-
-        ts_color_array_str = palette_to_typescript_color_array_str(palette=palette)
-        st.code(body=ts_color_array_str, language="typescript")
-
-        if st.button(label="Copy"):
-            pyperclip.copy(ts_color_array_str)
-            st.success("Copied to clipboard!")
+        palette_component(palette=palette)
 
 
 if __name__ == "__main__":
