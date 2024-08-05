@@ -55,12 +55,12 @@ def generate_palette(
     return palette
 
 
-def palette_to_typescript(palette: Dict[int, str]) -> str:
-    ts_object = "{\n"
+def palette_to_typescript_color_array_str(palette: Dict[int, str]) -> str:
+    ts_color_array_str = "{\n"
     for shade, color in palette.items():
-        ts_object += f'    {shade}: "{color}",\n'
-    ts_object += "}"
-    return ts_object
+        ts_color_array_str += f'    {shade}: "{color}",\n'
+    ts_color_array_str += "}"
+    return ts_color_array_str
 
 
 def main():
@@ -99,11 +99,11 @@ def main():
                 label=f"{shade}", value=color, key=f"color_{shade}", disabled=True
             )
 
-        ts_object = palette_to_typescript(palette=palette)
-        st.code(body=ts_object, language="typescript")
+        ts_color_array_str = palette_to_typescript_color_array_str(palette=palette)
+        st.code(body=ts_color_array_str, language="typescript")
 
         if st.button(label="Copy"):
-            pyperclip.copy(ts_object)
+            pyperclip.copy(ts_color_array_str)
             st.success("Copied to clipboard!")
 
 
