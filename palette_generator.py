@@ -77,6 +77,7 @@ def palette_to_typescript_color_array_str(palette: Dict[int, str]) -> str:
 
 def palette_parameter_component() -> PaletteParams:
     st.subheader("Parameters")
+
     start_color = st.color_picker(
         label="Start color", value="#FFFFFF", key="start_color"
     )
@@ -101,11 +102,10 @@ def palette_parameter_component() -> PaletteParams:
 
 def palette_component(palette: Dict[int, str]) -> None:
     st.subheader("Palette")
+
     cols = st.columns(len(palette))
     for (shade, color), col in zip(palette.items(), cols):
-        col.color_picker(
-            label=f"{shade}", value=color, key=f"color_{shade}", disabled=True
-        )
+        col.color_picker(label=f"{shade}", value=color, key=f"color_{shade}")
 
     ts_color_array_str = palette_to_typescript_color_array_str(palette=palette)
     st.code(body=ts_color_array_str, language="typescript")
