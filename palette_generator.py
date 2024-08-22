@@ -1,4 +1,3 @@
-import colorsys
 import math
 from typing import Dict, List, NamedTuple, Tuple
 
@@ -41,17 +40,14 @@ def normalize_sigmoid(x: float, steepness: float) -> float:
 def interpolate_color(color1: str, color2: str, factor: float, steepness: float) -> str:
     rgb1 = hex_to_rgb(hex_color=color1)
     rgb2 = hex_to_rgb(hex_color=color2)
-    hsv1 = colorsys.rgb_to_hsv(*(x / 255 for x in rgb1))
-    hsv2 = colorsys.rgb_to_hsv(*(x / 255 for x in rgb2))
 
     adjusted_factor = normalize_sigmoid(x=factor, steepness=steepness)
 
-    h = hsv1[0] + adjusted_factor * (hsv2[0] - hsv1[0])
-    s = hsv1[1] + adjusted_factor * (hsv2[1] - hsv1[1])
-    v = hsv1[2] + adjusted_factor * (hsv2[2] - hsv1[2])
+    r = int(rgb1[0] + adjusted_factor * (rgb2[0] - rgb1[0]))
+    g = int(rgb1[1] + adjusted_factor * (rgb2[1] - rgb1[1]))
+    b = int(rgb1[2] + adjusted_factor * (rgb2[2] - rgb1[2]))
 
-    rgb = colorsys.hsv_to_rgb(h, s, v)
-    return rgb_to_hex(rgb=tuple(int(x * 255) for x in rgb))
+    return rgb_to_hex((r, g, b))
 
 
 def generate_palette(params: PaletteParams) -> Dict[int, str]:
