@@ -85,13 +85,9 @@ def palette_parameter_component() -> PaletteParams:
             st.session_state.start_color,
         )
 
-    start_color = st.color_picker(
-        label="Start color", value=st.session_state.start_color, key="start_color"
-    )
-    st.button("⬇️⬆️", on_click=swap_colors)
-    end_color = st.color_picker(
-        label="End color", value=st.session_state.end_color, key="end_color"
-    )
+    start_color = st.color_picker(label="Start color", key="start_color")
+    st.button(label="⬇️⬆️", on_click=swap_colors)
+    end_color = st.color_picker(label="End color", key="end_color")
 
     steepness = st.slider(
         label="Interpolation Curve Steepness",
