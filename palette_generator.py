@@ -74,10 +74,25 @@ def palette_to_typescript_color_array_str(palette: Dict[int, str]) -> str:
 def palette_parameter_component() -> PaletteParams:
     st.subheader("Parameters")
 
+    if "start_color" not in st.session_state:
+        st.session_state.start_color = "#FFFFFF"
+    if "end_color" not in st.session_state:
+        st.session_state.end_color = "#000000"
+
+    def swap_colors():
+        st.session_state.start_color, st.session_state.end_color = (
+            st.session_state.end_color,
+            st.session_state.start_color,
+        )
+
     start_color = st.color_picker(
-        label="Start color", value="#FFFFFF", key="start_color"
+        label="Start color", value=st.session_state.start_color, key="start_color"
     )
-    end_color = st.color_picker(label="End color", value="#000000", key="end_color")
+    st.button("⬇️⬆️", on_click=swap_colors)
+    end_color = st.color_picker(
+        label="End color", value=st.session_state.end_color, key="end_color"
+    )
+
     steepness = st.slider(
         label="Interpolation Curve Steepness",
         min_value=1.0,
