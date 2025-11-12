@@ -1,4 +1,5 @@
 import math
+from enum import Enum
 from typing import Dict, List, NamedTuple, Optional, Tuple
 
 try:
@@ -27,6 +28,17 @@ class GeneratedPalette(NamedTuple):
     middle_shade: Optional[int]
 
 
+class PaletteFormat(str, Enum):
+    HEX = "hex"
+    RGB = "rgb"
+
+
+PALETTE_FORMAT_LABELS = {
+    PaletteFormat.HEX: "Hex (#RRGGBB)",
+    PaletteFormat.RGB: "RGB (r, g, b)",
+}
+
+
 def hex_to_rgb(hex_color: str) -> Tuple[int, int, int]:
     hex_color = hex_color.lstrip("#")
     return tuple(int(hex_color[i : i + 2], 16) for i in (0, 2, 4))
@@ -36,6 +48,13 @@ def rgb_to_hex(rgb: Tuple[int, int, int]) -> str:
     return "#{:02x}{:02x}{:02x}".format(rgb[0], rgb[1], rgb[2])
 
 
+def format_hex_color(hex_color: str, palette_format: PaletteFormat) -> str:
+    if palette_format == PaletteFormat.RGB:
+        r, g, b = hex_to_rgb(hex_color)
+        return f"rgb({r}, {g}, {b})"
+    return hex_color
+
+
 def clamp_channel(value: float) -> int:
     return max(0, min(255, int(round(value))))
 
@@ -43,9 +62,7 @@ def clamp_channel(value: float) -> int:
 def mix_toward(
     rgb: Tuple[int, int, int], target: Tuple[int, int, int], ratio: float
 ) -> Tuple[int, int, int]:
-    return tuple(
-        clamp_channel(rgb[i] + (target[i] - rgb[i]) * ratio) for i in range(3)
-    )
+    return tuple(clamp_channel(rgb[i] + (target[i] - rgb[i]) * ratio) for i in range(3))
 
 
 def derive_endpoint_from_middle(
@@ -58,9 +75,7 @@ def derive_endpoint_from_middle(
         return rgb_to_hex(rgb=tuple(clamp_channel(v) for v in mirrored))
 
     bound_rgb = (255, 255, 255) if target == "start" else (0, 0, 0)
-    derived = mix_toward(
-        rgb=middle_rgb, target=bound_rgb, ratio=AUTO_DERIVATION_RATIO
-    )
+    derived = mix_toward(rgb=middle_rgb, target=bound_rgb, ratio=AUTO_DERIVATION_RATIO)
     return rgb_to_hex(rgb=derived)
 
 
@@ -96,7 +111,9 @@ def nearest_shade_index(position: float) -> Tuple[int, float]:
     if not TAILWIND_SHADES:
         raise ValueError("TAILWIND_SHADES cannot be empty")
 
-    normalized_positions = [i / (len(TAILWIND_SHADES) - 1) for i in range(len(TAILWIND_SHADES))]
+    normalized_positions = [
+        i / (len(TAILWIND_SHADES) - 1) for i in range(len(TAILWIND_SHADES))
+    ]
     nearest = min(
         range(len(TAILWIND_SHADES)),
         key=lambda idx: abs(position - normalized_positions[idx]),
@@ -149,7 +166,9 @@ def generate_palette(params: PaletteParams) -> GeneratedPalette:
             warnings.append("End color fell back to #000000 because it was cleared.")
 
     if start_color is None or end_color is None:
-        raise ValueError("Start and end colors must be resolved before generating a palette.")
+        raise ValueError(
+            "Start and end colors must be resolved before generating a palette."
+        )
 
     if derived_start:
         auto_labels[TAILWIND_SHADES[0]] = "auto"
@@ -215,10 +234,13 @@ def generate_palette(params: PaletteParams) -> GeneratedPalette:
     )
 
 
-def palette_to_typescript_color_array_str(palette: Dict[int, str]) -> str:
+def palette_to_typescript_color_array_str(
+    palette: Dict[int, str], palette_format: PaletteFormat = PaletteFormat.HEX
+) -> str:
     ts_color_array_str = "{\n"
     for shade, color in palette.items():
-        ts_color_array_str += f'    {shade}: "{color}",\n'
+        formatted = format_hex_color(color, palette_format)
+        ts_color_array_str += f'    {shade}: "{formatted}",\n'
     ts_color_array_str += "}"
     return ts_color_array_str
 
@@ -304,15 +326,17 @@ def palette_component(generated_palette: GeneratedPalette) -> None:
     cols = st.columns(len(palette))
     for (shade, color), col in zip(palette.items(), cols):
         col.color_picker(label=f"{shade}", value=color, key=f"color_{shade}")
-        badges: List[str] = []
-        if generated_palette.auto_labels.get(shade):
-            badges.append("auto")
-        if generated_palette.middle_shade == shade:
-            badges.append("middle")
-        if badges:
-            col.caption(" • ".join(badges))
 
-    ts_color_array_str = palette_to_typescript_color_array_str(palette=palette)
+    palette_format = st.selectbox(
+        label="Format",
+        options=list(PaletteFormat),
+        format_func=lambda opt: PALETTE_FORMAT_LABELS[opt],
+        key="palette_format",
+    )
+
+    ts_color_array_str = palette_to_typescript_color_array_str(
+        palette=palette, palette_format=palette_format
+    )
     st.code(body=ts_color_array_str, language="typescript")
 
     if st.button(label="Copy"):
