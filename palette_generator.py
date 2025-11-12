@@ -1,13 +1,15 @@
+import importlib
 import math
 from enum import Enum
-from typing import Dict, List, NamedTuple, Optional, Tuple
-
-try:
-    import pyperclip
-except ImportError:  # pragma: no cover - optional dependency
-    pyperclip = None  # type: ignore[assignment]
+from typing import Any, Dict, List, NamedTuple, Optional, Tuple
 
 import streamlit as st
+
+pyperclip: Optional[Any]
+try:
+    pyperclip = importlib.import_module("pyperclip")
+except ImportError:  # pragma: no cover - optional dependency
+    pyperclip = None
 
 TAILWIND_SHADES = [50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 950]
 AUTO_DERIVATION_RATIO = 0.65
@@ -41,7 +43,10 @@ PALETTE_FORMAT_LABELS = {
 
 def hex_to_rgb(hex_color: str) -> Tuple[int, int, int]:
     hex_color = hex_color.lstrip("#")
-    return tuple(int(hex_color[i : i + 2], 16) for i in (0, 2, 4))
+    r = int(hex_color[0:2], 16)
+    g = int(hex_color[2:4], 16)
+    b = int(hex_color[4:6], 16)
+    return (r, g, b)
 
 
 def rgb_to_hex(rgb: Tuple[int, int, int]) -> str:
@@ -62,7 +67,10 @@ def clamp_channel(value: float) -> int:
 def mix_toward(
     rgb: Tuple[int, int, int], target: Tuple[int, int, int], ratio: float
 ) -> Tuple[int, int, int]:
-    return tuple(clamp_channel(rgb[i] + (target[i] - rgb[i]) * ratio) for i in range(3))
+    r = clamp_channel(rgb[0] + (target[0] - rgb[0]) * ratio)
+    g = clamp_channel(rgb[1] + (target[1] - rgb[1]) * ratio)
+    b = clamp_channel(rgb[2] + (target[2] - rgb[2]) * ratio)
+    return (r, g, b)
 
 
 def derive_endpoint_from_middle(
@@ -71,8 +79,10 @@ def derive_endpoint_from_middle(
     middle_rgb = hex_to_rgb(hex_color=middle_color)
     if known_color:
         known_rgb = hex_to_rgb(hex_color=known_color)
-        mirrored = tuple(2 * middle_rgb[i] - known_rgb[i] for i in range(3))
-        return rgb_to_hex(rgb=tuple(clamp_channel(v) for v in mirrored))
+        r = clamp_channel(2 * middle_rgb[0] - known_rgb[0])
+        g = clamp_channel(2 * middle_rgb[1] - known_rgb[1])
+        b = clamp_channel(2 * middle_rgb[2] - known_rgb[2])
+        return rgb_to_hex(rgb=(r, g, b))
 
     bound_rgb = (255, 255, 255) if target == "start" else (0, 0, 0)
     derived = mix_toward(rgb=middle_rgb, target=bound_rgb, ratio=AUTO_DERIVATION_RATIO)

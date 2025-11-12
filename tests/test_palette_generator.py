@@ -5,7 +5,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from palette_generator import (
+from palette_generator import (  # noqa: E402
     AUTO_DERIVATION_RATIO,
     TAILWIND_SHADES,
     PaletteFormat,
