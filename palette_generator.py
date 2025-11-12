@@ -3,13 +3,13 @@ import math
 from enum import Enum
 from typing import Any, Dict, List, NamedTuple, Optional, Tuple
 
+import streamlit as st
+
 pyperclip: Optional[Any]
 try:
     pyperclip = importlib.import_module("pyperclip")
 except ImportError:  # pragma: no cover - optional dependency
     pyperclip = None
-
-import streamlit as st
 
 TAILWIND_SHADES = [50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 950]
 AUTO_DERIVATION_RATIO = 0.65
