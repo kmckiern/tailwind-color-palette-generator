@@ -8,6 +8,7 @@ if str(ROOT) not in sys.path:
 from palette_generator import (
     AUTO_DERIVATION_RATIO,
     TAILWIND_SHADES,
+    PaletteFormat,
     PaletteParams,
     clamp_channel,
     generate_palette,
@@ -117,3 +118,14 @@ def test_typescript_export_preserves_shade_order():
 
     assert ts_str.strip().startswith("{")
     assert ts_str.strip().endswith("}")
+
+
+def test_typescript_export_rgb_format():
+    params = PaletteParams(start_color="#000000", end_color="#ffffff", steepness=1.0)
+    generated = generate_palette(params)
+    ts_str = palette_to_typescript_color_array_str(
+        generated.colors, palette_format=PaletteFormat.RGB
+    )
+
+    assert "rgb(0, 0, 0)" in ts_str
+    assert "#" not in ts_str
