@@ -15,11 +15,6 @@ from palette_generator import (
 )
 
 
-def shade_position(shade: int) -> float:
-    idx = TAILWIND_SHADES.index(shade)
-    return idx / (len(TAILWIND_SHADES) - 1)
-
-
 def test_generate_palette_two_point_defaults():
     params = PaletteParams(
         start=hex_to_oklch("#111111"),
@@ -44,13 +39,13 @@ def test_generate_palette_three_point_explicit_middle():
         end=hex_to_oklch("#eeeeee"),
         steepness=1.0,
         middle=hex_to_oklch("#777777"),
-        middle_position=shade_position(500),
         start_active=True,
         end_active=True,
         middle_active=True,
     )
     generated = generate_palette(params)
 
+    # Middle anchor always maps to shade 500
     assert generated.middle_shade == 500
     hex_palette = generated.hex_colors()
     assert hex_palette[500] == "#777777"
@@ -66,7 +61,6 @@ def test_generate_palette_middle_with_start_derives_end():
         end=None,
         steepness=1.0,
         middle=hex_to_oklch(middle),
-        middle_position=shade_position(500),
         start_active=True,
         middle_active=True,
         end_active=False,
@@ -90,7 +84,6 @@ def test_generate_palette_middle_only_derives_both_endpoints():
         end=None,
         steepness=1.0,
         middle=hex_to_oklch(middle),
-        middle_position=shade_position(500),
         middle_active=True,
     )
     generated = generate_palette(params)
@@ -271,3 +264,36 @@ def test_format_palette_export_default_options_match_legacy():
     options = PaletteExportOptions(line_terminator=",", wrap_values_in_quotes=True)
     new_output = format_palette_export(generated.colors, PaletteFormat.HEX, options)
     assert legacy_output == new_output
+
+
+def test_middle_anchor_always_maps_to_shade_500():
+    # Test that regardless of middle color, it always goes to shade 500
+    middle_color = hex_to_oklch("#8888ff")
+    params = PaletteParams(
+        start=hex_to_oklch("#f0f0ff"),
+        end=hex_to_oklch("#000088"),
+        middle=middle_color,
+        steepness=1.0,
+        start_active=True,
+        middle_active=True,
+        end_active=True,
+    )
+    generated = generate_palette(params)
+
+    assert generated.middle_shade == 500
+    assert generated.hex_colors()[500] == "#8888ff"
+
+
+def test_middle_anchor_off_no_middle_shade():
+    # Test that when middle is not active, middle_shade is None
+    params = PaletteParams(
+        start=hex_to_oklch("#ffffff"),
+        end=hex_to_oklch("#000000"),
+        steepness=1.0,
+        start_active=True,
+        middle_active=False,
+        end_active=True,
+    )
+    generated = generate_palette(params)
+
+    assert generated.middle_shade is None

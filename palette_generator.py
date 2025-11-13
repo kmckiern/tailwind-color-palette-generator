@@ -27,7 +27,6 @@ from defaults import (
     DEFAULT_EXPORT_WRAP_QUOTES,
     DEFAULT_LIGHTNESS_BOUNDS,
     DEFAULT_MIDDLE_COLOR_OKLCH,
-    DEFAULT_MIDDLE_POSITION,
     DEFAULT_START_COLOR_OKLCH,
     DEFAULT_STEEPNESS,
     DEFAULT_UI_ENFORCE_MINIMUMS,
@@ -49,7 +48,6 @@ class PaletteParams:
     end: Optional[OklchColor] = None
     steepness: float = DEFAULT_STEEPNESS
     middle: Optional[OklchColor] = None
-    middle_position: float = DEFAULT_MIDDLE_POSITION
     min_lightness: float = DEFAULT_LIGHTNESS_BOUNDS[0]
     max_lightness: float = DEFAULT_LIGHTNESS_BOUNDS[1]
     min_chroma: float = DEFAULT_CHROMA_BOUNDS[0]
@@ -315,13 +313,8 @@ def generate_palette(params: PaletteParams) -> GeneratedPalette:
     palette: Dict[int, OklchColor] = {}
 
     if middle:
-        idx, diff = nearest_shade_index(position=params.middle_position)
-        middle_shade = TAILWIND_SHADES[idx]
-        if diff > 1e-6:
-            nearest_value = idx / (len(TAILWIND_SHADES) - 1)
-            warnings.append(
-                f"Middle position snapped to Tailwind shade {middle_shade} (normalized {nearest_value:.2f})."
-            )
+        # Middle anchor always maps to shade 500
+        middle_shade = 500
 
         lower_shades = [shade for shade in TAILWIND_SHADES if shade <= middle_shade]
         upper_shades = [shade for shade in TAILWIND_SHADES if shade >= middle_shade]
@@ -445,6 +438,7 @@ def perceptual_color_editor(
     color_key: str,
     color_placeholder: Any,
     default: OklchColor,
+    container: Any = st,
 ) -> Optional[OklchColor]:
     _ensure_oklch_state(color_key, default)
 
@@ -518,14 +512,14 @@ def perceptual_color_editor(
 
     base = hex_to_oklch(base_hex)
 
-    l_display = st.slider(
+    l_display = container.slider(
         label="Lightness (perceptual)",
         min_value=0.0,
         max_value=1.0,
         value=float(st.session_state.get(l_state_key, toe(base[0]))),
         key=l_state_key,
     )
-    chroma_value = st.slider(
+    chroma_value = container.slider(
         label="Chroma",
         min_value=0.0,
         max_value=0.45,
@@ -533,7 +527,7 @@ def perceptual_color_editor(
         value=float(st.session_state.get(c_state_key, base[1])),
         key=c_state_key,
     )
-    hue_value = st.slider(
+    hue_value = container.slider(
         label="Hue",
         min_value=0.0,
         max_value=360.0,
@@ -559,84 +553,110 @@ def perceptual_color_editor(
 
 
 def render_anchor(
-    label: str, color_key: str, default_oklch: OklchColor
+    label: str, color_key: str, default_oklch: OklchColor, container: Any
 ) -> Tuple[Optional[OklchColor], bool]:
     _ensure_oklch_state(color_key, default_oklch)
     if f"{color_key}_active" not in st.session_state:
         st.session_state[f"{color_key}_active"] = True
 
-    st.markdown(f"**{label}**")
-    active = st.checkbox("Active", key=f"{color_key}_active")
+    container.markdown(f"**{label}**")
+    active = container.checkbox("Active", key=f"{color_key}_active")
     if not active:
         return None, False
 
-    color_placeholder = st.empty()
+    color_placeholder = container.empty()
     oklch = perceptual_color_editor(
         label=label,
         color_key=color_key,
         color_placeholder=color_placeholder,
         default=default_oklch,
+        container=container,
     )
     return oklch, True
 
 
 def palette_parameter_component() -> PaletteParams:
     st.header("Parameters")
+
     st.subheader("Anchors")
+
+    # Create 1x3 grid for anchors
+    col_start, col_middle, col_end = st.columns(3)
+
     start, start_active = render_anchor(
-        "Start", "start_color", DEFAULT_START_COLOR_OKLCH
+        "Start", "start_color", DEFAULT_START_COLOR_OKLCH, col_start
     )
     middle, middle_active = render_anchor(
-        "Middle", "middle_color", DEFAULT_MIDDLE_COLOR_OKLCH
+        "Middle", "middle_color", DEFAULT_MIDDLE_COLOR_OKLCH, col_middle
+    )
+    end, end_active = render_anchor(
+        "End", "end_color", DEFAULT_END_COLOR_OKLCH, col_end
     )
 
-    middle_position = DEFAULT_MIDDLE_POSITION
+    # Initialize expander states
+    if "show_interpolation" not in st.session_state:
+        st.session_state["show_interpolation"] = False
+    if "show_gamut" not in st.session_state:
+        st.session_state["show_gamut"] = False
 
-    end, end_active = render_anchor("End", "end_color", DEFAULT_END_COLOR_OKLCH)
+    with st.expander(
+        "Interpolation Curve", expanded=st.session_state["show_interpolation"]
+    ):
+        st.caption(
+            "Adjust how colors transition between anchors—higher steepness creates more contrast in the middle shades."
+        )
 
-    st.divider()
-    st.subheader("Interpolation Curve")
+        steepness = st.slider(
+            label="Steepness",
+            min_value=1.0,
+            max_value=16.0,
+            value=st.session_state.get("steepness", DEFAULT_STEEPNESS),
+            step=0.5,
+            key="steepness",
+        )
 
-    steepness = st.slider(
-        label="Steepness",
-        min_value=1.0,
-        max_value=16.0,
-        value=st.session_state.get("steepness", DEFAULT_STEEPNESS),
-        step=0.5,
-        key="steepness",
-    )
+        x = linspace(start=0, stop=1, num=100)
+        y = [normalize_sigmoid(x=i, steepness=steepness) for i in x]
+        st.line_chart(data={"Curve": y})
 
-    x = linspace(start=0, stop=1, num=100)
-    y = [normalize_sigmoid(x=i, steepness=steepness) for i in x]
-    st.line_chart(data={"Curve": y})
+        # Track expander state
+        st.session_state["show_interpolation"] = True
 
-    st.divider()
-    st.subheader("Gamut Constraints")
-    lightness_bounds = st.slider(
-        label="Allowed Lightness",
-        min_value=0.0,
-        max_value=1.0,
-        value=st.session_state.get("oklch_lightness_bounds", DEFAULT_LIGHTNESS_BOUNDS),
-        step=0.01,
-        key="oklch_lightness_bounds",
-    )
-    chroma_bounds = st.slider(
-        label="Allowed Chroma",
-        min_value=0.0,
-        max_value=0.45,
-        value=st.session_state.get("oklch_chroma_bounds", DEFAULT_CHROMA_BOUNDS),
-        step=0.01,
-        key="oklch_chroma_bounds",
-    )
+    with st.expander("Gamut Constraints", expanded=st.session_state["show_gamut"]):
+        st.caption(
+            "Set display-safe bounds for lightness and chroma to prevent muddy or clipped colors."
+        )
 
-    enforce_minimums = st.checkbox(
-        label="Enforce safe-range floors",
-        value=st.session_state.get(
-            "oklch_enforce_minimums", DEFAULT_UI_ENFORCE_MINIMUMS
-        ),
-        key="oklch_enforce_minimums",
-        help="Raise shades that drift below the lightness/chroma bounds to avoid muddy ramps.",
-    )
+        lightness_bounds = st.slider(
+            label="Allowed Lightness",
+            min_value=0.0,
+            max_value=1.0,
+            value=st.session_state.get(
+                "oklch_lightness_bounds", DEFAULT_LIGHTNESS_BOUNDS
+            ),
+            step=0.01,
+            key="oklch_lightness_bounds",
+        )
+        chroma_bounds = st.slider(
+            label="Allowed Chroma",
+            min_value=0.0,
+            max_value=0.45,
+            value=st.session_state.get("oklch_chroma_bounds", DEFAULT_CHROMA_BOUNDS),
+            step=0.01,
+            key="oklch_chroma_bounds",
+        )
+
+        enforce_minimums = st.checkbox(
+            label="Enforce safe-range floors",
+            value=st.session_state.get(
+                "oklch_enforce_minimums", DEFAULT_UI_ENFORCE_MINIMUMS
+            ),
+            key="oklch_enforce_minimums",
+            help="Raise shades that drift below the lightness/chroma bounds to avoid muddy ramps.",
+        )
+
+        # Track expander state
+        st.session_state["show_gamut"] = True
 
     min_lightness, max_lightness = lightness_bounds
     min_chroma, max_chroma = chroma_bounds
@@ -646,7 +666,6 @@ def palette_parameter_component() -> PaletteParams:
         end=end if end_active else None,
         steepness=steepness,
         middle=middle if middle_active else None,
-        middle_position=middle_position,
         min_lightness=min_lightness,
         max_lightness=max_lightness,
         min_chroma=min_chroma,
