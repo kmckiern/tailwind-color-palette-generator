@@ -2,9 +2,11 @@ from color_spaces import enforce_gamut, hex_to_oklch, oklch_to_hex
 from palette_generator import (
     AUTO_DERIVATION_RATIO,
     TAILWIND_SHADES,
+    PaletteExportOptions,
     PaletteFormat,
     PaletteParams,
     clamp_channel,
+    format_palette_export,
     generate_palette,
     hex_to_rgb,
     palette_to_typescript_color_array_str,
@@ -63,6 +65,7 @@ def test_generate_palette_middle_with_start_derives_end():
     )
 
     assert generated.colors[TAILWIND_SHADES[-1]] == expected_end
+    assert generated.auto_labels.get(TAILWIND_SHADES[-1]) == "auto"
     assert generated.auto_labels.get(TAILWIND_SHADES[-1]) == "auto"
 
 
@@ -164,3 +167,48 @@ def test_enforce_gamut_reduces_high_chroma():
     )
     assert result.chroma_after <= result.chroma_before
     assert result.clipped is True
+
+
+def test_format_palette_export_defaults_are_semicolon_unquoted():
+    palette = {50: "#f8fafc"}
+    result = format_palette_export(
+        palette,
+        PaletteFormat.HEX,
+        PaletteExportOptions(),
+    )
+    assert "50: #f8fafc;" in result
+    assert '"#f8fafc"' not in result
+
+
+def test_format_palette_export_with_prefix_and_comma():
+    palette = {50: "#f8fafc", 900: "#020617"}
+    options = PaletteExportOptions(
+        key_prefix="--color-", line_terminator=",", wrap_values_in_quotes=True
+    )
+    result = format_palette_export(palette, PaletteFormat.HEX, options)
+    assert '"--color-50": "#f8fafc",' in result
+    assert '"--color-900": "#020617",' in result
+    assert result.strip().startswith("{")
+    assert result.strip().endswith("}")
+
+
+def test_format_palette_export_no_quotes_and_semicolon():
+    palette = {50: "#f8fafc", 900: "#020617"}
+    options = PaletteExportOptions(
+        key_prefix="--color-", line_terminator=";", wrap_values_in_quotes=False
+    )
+    result = format_palette_export(palette, PaletteFormat.HEX, options)
+    assert '"--color-50": #f8fafc;' in result
+    assert '"--color-900": #020617;' in result
+    assert '": "#' not in result  # No quotes around hex value
+
+
+def test_format_palette_export_default_options_match_legacy():
+    params = PaletteParams(start_color="#000000", end_color="#ffffff", steepness=1.0)
+    generated = generate_palette(params)
+    legacy_output = palette_to_typescript_color_array_str(generated.colors)
+
+    # The new default is semicolon, so we override to comma for this test
+    options = PaletteExportOptions(line_terminator=",", wrap_values_in_quotes=True)
+    new_output = format_palette_export(generated.colors, PaletteFormat.HEX, options)
+    assert legacy_output == new_output

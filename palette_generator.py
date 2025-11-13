@@ -51,6 +51,13 @@ class PaletteParams:
 
 
 @dataclass
+class PaletteExportOptions:
+    key_prefix: str = ""
+    line_terminator: str = ";"
+    wrap_values_in_quotes: bool = False
+
+
+@dataclass
 class GeneratedPalette:
     colors: Dict[int, str]
     auto_labels: Dict[int, str]
@@ -386,15 +393,37 @@ def generate_palette(params: PaletteParams) -> GeneratedPalette:
     )
 
 
+def format_palette_export(
+    palette: Dict[int, str],
+    palette_format: PaletteFormat,
+    options: PaletteExportOptions,
+) -> str:
+    lines: List[str] = []
+    for shade, color in palette.items():
+        formatted_value = format_hex_color(color, palette_format)
+        if options.wrap_values_in_quotes:
+            value_str = f'"{formatted_value}"'
+        else:
+            value_str = formatted_value
+
+        key_str = f"{options.key_prefix}{shade}"
+        if " " in key_str or "-" in key_str:  # Basic check if key needs quotes
+            key_str = f'"{key_str}"'
+
+        lines.append(f"    {key_str}: {value_str}{options.line_terminator}")
+
+    return "{\n" + "\n".join(lines) + "\n}"
+
+
 def palette_to_typescript_color_array_str(
     palette: Dict[int, str], palette_format: PaletteFormat = PaletteFormat.HEX
 ) -> str:
-    ts_color_array_str = "{\n"
-    for shade, color in palette.items():
-        formatted = format_hex_color(color, palette_format)
-        ts_color_array_str += f'    {shade}: "{formatted}",\n'
-    ts_color_array_str += "}"
-    return ts_color_array_str
+    # Maintain backward compatibility for tests.
+    return format_palette_export(
+        palette,
+        palette_format,
+        PaletteExportOptions(line_terminator=",", wrap_values_in_quotes=True),
+    )
 
 
 def perceptual_color_editor(
@@ -640,6 +669,37 @@ def palette_component(generated_palette: GeneratedPalette) -> None:
         for shade, color in palette.items():
             st.session_state[f"color_{shade}"] = color
 
+    with st.expander("Export Options", expanded=False):
+        if "palette_format" not in st.session_state:
+            st.session_state["palette_format"] = PaletteFormat.OKLCH
+        if "export_line_terminator" not in st.session_state:
+            st.session_state["export_line_terminator"] = ";"
+        if "export_wrap_quotes" not in st.session_state:
+            st.session_state["export_wrap_quotes"] = False
+        if "export_key_prefix" not in st.session_state:
+            st.session_state["export_key_prefix"] = ""
+
+        key_prefix = st.text_input(
+            "Key Prefix",
+            key="export_key_prefix",
+            help="Prepended before each shade number.",
+        )
+        line_terminator = st.text_input(
+            "Line Terminator",
+            key="export_line_terminator",
+            help="Appended after each color (e.g., ;, ,, blank).",
+        )
+        wrap_values_in_quotes = st.checkbox(
+            "Wrap Values In Quotes",
+            key="export_wrap_quotes",
+        )
+        palette_format = st.selectbox(
+            label="Format",
+            options=list(PaletteFormat),
+            format_func=lambda opt: PALETTE_FORMAT_LABELS[opt],
+            key="palette_format",
+        )
+
     cols = st.columns(len(palette))
     for (shade, color), col in zip(palette.items(), cols):
         col.color_picker(label=f"{shade}", key=f"color_{shade}")
@@ -647,18 +707,14 @@ def palette_component(generated_palette: GeneratedPalette) -> None:
         if note:
             col.caption("⚠️")
 
-    if "palette_format" not in st.session_state:
-        st.session_state["palette_format"] = PaletteFormat.OKLCH
-
-    palette_format = st.selectbox(
-        label="Format",
-        options=list(PaletteFormat),
-        format_func=lambda opt: PALETTE_FORMAT_LABELS[opt],
-        key="palette_format",
+    export_options = PaletteExportOptions(
+        key_prefix=key_prefix,
+        line_terminator=line_terminator,
+        wrap_values_in_quotes=wrap_values_in_quotes,
     )
 
-    ts_color_array_str = palette_to_typescript_color_array_str(
-        palette=palette, palette_format=palette_format
+    ts_color_array_str = format_palette_export(
+        palette=palette, palette_format=palette_format, options=export_options
     )
     st.code(body=ts_color_array_str, language="typescript")
 
