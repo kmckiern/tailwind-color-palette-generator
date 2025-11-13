@@ -77,8 +77,8 @@ def format_hex_color(hex_color: str, palette_format: PaletteFormat) -> str:
         r, g, b = hex_to_rgb(hex_color)
         return f"rgb({r}, {g}, {b})"
     if palette_format == PaletteFormat.OKLCH:
-        l, c, h = hex_to_oklch(hex_color)
-        return f"oklch({l:.4f}, {c:.4f}, {h:.2f})"
+        lightness, chroma, hue = hex_to_oklch(hex_color)
+        return f"oklch({lightness:.4f}, {chroma:.4f}, {hue:.2f})"
     return hex_color
 
 
@@ -154,7 +154,9 @@ def _sync_oklch_editor_state(
     st.session_state[h_snapshot_key] = float(st.session_state[h_state_key])
 
 
-def _sync_color_picker_widget(color_key: str, hex_value: str, *, force: bool = False) -> None:
+def _sync_color_picker_widget(
+    color_key: str, hex_value: str, *, force: bool = False
+) -> None:
     picker_state_key = f"{color_key}_picker"
     if force or picker_state_key not in st.session_state:
         st.session_state[picker_state_key] = hex_value
@@ -170,11 +172,11 @@ def interpolate_oklch(
     color1: OklchColor, color2: OklchColor, factor: float, steepness: float
 ) -> OklchColor:
     adjusted = normalize_sigmoid(x=factor, steepness=steepness)
-    l = color1[0] + adjusted * (color2[0] - color1[0])
+    lightness = color1[0] + adjusted * (color2[0] - color1[0])
     c = color1[1] + adjusted * (color2[1] - color1[1])
     delta_h = ((color2[2] - color1[2] + 180) % 360) - 180
     h = normalize_hue(color1[2] + adjusted * delta_h)
-    return (l, c, h)
+    return (lightness, c, h)
 
 
 def apply_gamut_constraints(
@@ -425,7 +427,8 @@ def perceptual_color_editor(
         key in st.session_state for key in (l_state_key, c_state_key, h_state_key)
     )
     slider_snapshots_ready = all(
-        key in st.session_state for key in (l_snapshot_key, c_snapshot_key, h_snapshot_key)
+        key in st.session_state
+        for key in (l_snapshot_key, c_snapshot_key, h_snapshot_key)
     )
 
     def _slider_dirty(state_key: str, snapshot_key: str) -> bool:

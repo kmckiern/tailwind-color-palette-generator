@@ -1,4 +1,5 @@
 """Color space utilities for OKLCH conversions and gamut enforcement."""
+
 from __future__ import annotations
 
 import math
@@ -10,7 +11,8 @@ OklchColor = Tuple[float, float, float]
 SrgbFloat = Tuple[float, float, float]
 
 
-# --- Basic RGB helpers -----------------------------------------------------
+# Basic RGB helpers
+
 
 def hex_to_rgb(hex_color: str) -> RgbTuple:
     hex_color = hex_color.lstrip("#")
@@ -41,7 +43,8 @@ def _linear_to_srgb(channel: float) -> float:
     return 1.055 * (channel ** (1 / 2.4)) - 0.055
 
 
-# --- OKLab/OKLCH conversions -----------------------------------------------
+# OKLab/OKLCH conversions
+
 
 def _srgb_to_oklab(rgb: SrgbFloat) -> Tuple[float, float, float]:
     r_l, g_l, b_l = (_srgb_to_linear(c) for c in rgb)
@@ -66,9 +69,9 @@ def _oklab_to_srgb(oklab: Tuple[float, float, float]) -> SrgbFloat:
     m_ = L - 0.1055613458 * a - 0.0638541728 * b
     s_ = L - 0.0894841775 * a - 1.2914855480 * b
 
-    l = l_ ** 3
-    m = m_ ** 3
-    s = s_ ** 3
+    l = l_**3
+    m = m_**3
+    s = s_**3
 
     r_l = +4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s
     g_l = -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s
@@ -81,7 +84,11 @@ def _oklab_to_srgb(oklab: Tuple[float, float, float]) -> SrgbFloat:
 
 
 def rgb_to_oklch(rgb: RgbTuple) -> OklchColor:
-    srgb = tuple(_srgb_byte_to_float(c) for c in rgb)
+    srgb: SrgbFloat = (
+        _srgb_byte_to_float(rgb[0]),
+        _srgb_byte_to_float(rgb[1]),
+        _srgb_byte_to_float(rgb[2]),
+    )
     L, a, b = _srgb_to_oklab(srgb)
     C = math.sqrt(a * a + b * b)
     h = math.degrees(math.atan2(b, a)) % 360
@@ -93,7 +100,11 @@ def oklch_to_rgb(oklch: OklchColor) -> RgbTuple:
     a = C * math.cos(math.radians(h))
     b = C * math.sin(math.radians(h))
     srgb = _oklab_to_srgb((L, a, b))
-    return tuple(_srgb_float_to_byte(c) for c in srgb)
+    return (
+        _srgb_float_to_byte(srgb[0]),
+        _srgb_float_to_byte(srgb[1]),
+        _srgb_float_to_byte(srgb[2]),
+    )
 
 
 def hex_to_oklch(hex_color: str) -> OklchColor:
@@ -108,7 +119,7 @@ def normalize_hue(hue: float) -> float:
     return hue % 360.0
 
 
-# --- Toe remap helpers -----------------------------------------------------
+# Toe remap helpers
 
 K1 = 0.206
 K2 = 0.03
@@ -123,7 +134,7 @@ def toe_inv(x: float) -> float:
     return (x * x + K1 * x) / (K3 * (x + K2))
 
 
-# --- Gamut enforcement -----------------------------------------------------
+# Gamut enforcement
 
 
 def _is_in_gamut(srgb: SrgbFloat) -> bool:
@@ -179,7 +190,7 @@ def enforce_gamut(
         clipped = True
         low = 0.0
         high = chroma_target
-        srgb_in_gamut = (_srgb_float_to_byte(0) / 255.0,) * 3  # placeholder
+        srgb_in_gamut: SrgbFloat = (0.0, 0.0, 0.0)
         for _ in range(max_iterations):
             mid = (low + high) / 2
             srgb_candidate = _oklch_to_srgb_float((lightness_clamped, mid, h))
@@ -194,8 +205,16 @@ def enforce_gamut(
         candidate = (lightness_clamped, chroma_solution, h)
         srgb = srgb_in_gamut
 
-    srgb_clamped = tuple(min(1.0, max(0.0, c)) for c in srgb)
-    rgb_bytes = tuple(_srgb_float_to_byte(c) for c in srgb_clamped)
+    srgb_clamped: SrgbFloat = (
+        min(1.0, max(0.0, srgb[0])),
+        min(1.0, max(0.0, srgb[1])),
+        min(1.0, max(0.0, srgb[2])),
+    )
+    rgb_bytes: RgbTuple = (
+        _srgb_float_to_byte(srgb_clamped[0]),
+        _srgb_float_to_byte(srgb_clamped[1]),
+        _srgb_float_to_byte(srgb_clamped[2]),
+    )
 
     return GamutResult(
         hex_color=rgb_to_hex(rgb_bytes),

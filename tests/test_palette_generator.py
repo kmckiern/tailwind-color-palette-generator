@@ -1,12 +1,5 @@
-import sys
-from pathlib import Path
-
-ROOT = Path(__file__).resolve().parents[1]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
-
 from color_spaces import enforce_gamut, hex_to_oklch, oklch_to_hex
-from palette_generator import (  # noqa: E402
+from palette_generator import (
     AUTO_DERIVATION_RATIO,
     TAILWIND_SHADES,
     PaletteFormat,
