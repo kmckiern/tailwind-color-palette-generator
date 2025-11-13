@@ -4,17 +4,14 @@ from defaults import (
     DEFAULT_EXPORT_WRAP_QUOTES,
 )
 from palette_generator import (
-    AUTO_DERIVATION_RATIO,
     TAILWIND_SHADES,
     PaletteExportOptions,
     PaletteFormat,
     PaletteParams,
-    clamp_channel,
+    derive_oklch_from_middle,
     format_palette_export,
     generate_palette,
-    hex_to_rgb,
     palette_to_typescript_color_array_str,
-    rgb_to_hex,
 )
 
 
@@ -24,88 +21,104 @@ def shade_position(shade: int) -> float:
 
 
 def test_generate_palette_two_point_defaults():
-    params = PaletteParams(start_color="#111111", end_color="#eeeeee", steepness=1.0)
+    params = PaletteParams(
+        start=hex_to_oklch("#111111"),
+        end=hex_to_oklch("#eeeeee"),
+        steepness=1.0,
+        start_active=True,
+        end_active=True,
+    )
     generated = generate_palette(params)
 
     assert generated.middle_shade is None
-    assert generated.colors[TAILWIND_SHADES[0]] == "#111111"
-    assert generated.colors[TAILWIND_SHADES[-1]] == "#eeeeee"
+    hex_palette = generated.hex_colors()
+    assert hex_palette[TAILWIND_SHADES[0]] == "#111111"
+    assert hex_palette[TAILWIND_SHADES[-1]] == "#eeeeee"
     assert list(generated.colors.keys()) == TAILWIND_SHADES
     assert generated.auto_labels == {}
 
 
 def test_generate_palette_three_point_explicit_middle():
     params = PaletteParams(
-        start_color="#111111",
-        end_color="#eeeeee",
+        start=hex_to_oklch("#111111"),
+        end=hex_to_oklch("#eeeeee"),
         steepness=1.0,
-        middle_color="#777777",
+        middle=hex_to_oklch("#777777"),
         middle_position=shade_position(500),
+        start_active=True,
+        end_active=True,
+        middle_active=True,
     )
     generated = generate_palette(params)
 
     assert generated.middle_shade == 500
-    assert generated.colors[500] == "#777777"
-    assert generated.colors[TAILWIND_SHADES[0]] == "#111111"
-    assert generated.colors[TAILWIND_SHADES[-1]] == "#eeeeee"
+    hex_palette = generated.hex_colors()
+    assert hex_palette[500] == "#777777"
+    assert hex_palette[TAILWIND_SHADES[0]] == "#111111"
+    assert hex_palette[TAILWIND_SHADES[-1]] == "#eeeeee"
 
 
 def test_generate_palette_middle_with_start_derives_end():
     start = "#102030"
     middle = "#506070"
     params = PaletteParams(
-        start_color=start,
-        end_color=None,
+        start=hex_to_oklch(start),
+        end=None,
         steepness=1.0,
-        middle_color=middle,
+        middle=hex_to_oklch(middle),
         middle_position=shade_position(500),
+        start_active=True,
+        middle_active=True,
+        end_active=False,
     )
     generated = generate_palette(params)
 
-    start_rgb = hex_to_rgb(start)
-    middle_rgb = hex_to_rgb(middle)
-    expected_end = rgb_to_hex(
-        tuple(clamp_channel(2 * middle_rgb[i] - start_rgb[i]) for i in range(3))
+    expected_end = oklch_to_hex(
+        derive_oklch_from_middle(
+            middle=hex_to_oklch(middle), known=hex_to_oklch(start), target="end"
+        )
     )
 
-    assert generated.colors[TAILWIND_SHADES[-1]] == expected_end
-    assert generated.auto_labels.get(TAILWIND_SHADES[-1]) == "auto"
+    assert generated.hex_colors()[TAILWIND_SHADES[-1]] == expected_end
     assert generated.auto_labels.get(TAILWIND_SHADES[-1]) == "auto"
 
 
 def test_generate_palette_middle_only_derives_both_endpoints():
     middle = "#808080"
     params = PaletteParams(
-        start_color=None,
-        end_color=None,
+        start=None,
+        end=None,
         steepness=1.0,
-        middle_color=middle,
+        middle=hex_to_oklch(middle),
         middle_position=shade_position(500),
+        middle_active=True,
     )
     generated = generate_palette(params)
 
-    middle_rgb = hex_to_rgb(middle)
-    expected_start = rgb_to_hex(
-        tuple(
-            clamp_channel(middle_rgb[i] + (255 - middle_rgb[i]) * AUTO_DERIVATION_RATIO)
-            for i in range(3)
+    expected_start = oklch_to_hex(
+        derive_oklch_from_middle(
+            middle=hex_to_oklch(middle), known=None, target="start"
         )
     )
-    expected_end = rgb_to_hex(
-        tuple(
-            clamp_channel(middle_rgb[i] + (0 - middle_rgb[i]) * AUTO_DERIVATION_RATIO)
-            for i in range(3)
-        )
+    expected_end = oklch_to_hex(
+        derive_oklch_from_middle(middle=hex_to_oklch(middle), known=None, target="end")
     )
 
-    assert generated.colors[TAILWIND_SHADES[0]] == expected_start
-    assert generated.colors[TAILWIND_SHADES[-1]] == expected_end
+    hex_palette = generated.hex_colors()
+    assert hex_palette[TAILWIND_SHADES[0]] == expected_start
+    assert hex_palette[TAILWIND_SHADES[-1]] == expected_end
     assert generated.auto_labels.get(TAILWIND_SHADES[0]) == "auto"
     assert generated.auto_labels.get(TAILWIND_SHADES[-1]) == "auto"
 
 
 def test_typescript_export_preserves_shade_order():
-    params = PaletteParams(start_color="#000000", end_color="#ffffff", steepness=1.0)
+    params = PaletteParams(
+        start=hex_to_oklch("#000000"),
+        end=hex_to_oklch("#ffffff"),
+        steepness=1.0,
+        start_active=True,
+        end_active=True,
+    )
     generated = generate_palette(params)
     ts_str = palette_to_typescript_color_array_str(generated.colors)
 
@@ -122,7 +135,13 @@ def test_typescript_export_preserves_shade_order():
 
 
 def test_typescript_export_rgb_format():
-    params = PaletteParams(start_color="#000000", end_color="#ffffff", steepness=1.0)
+    params = PaletteParams(
+        start=hex_to_oklch("#000000"),
+        end=hex_to_oklch("#ffffff"),
+        steepness=1.0,
+        start_active=True,
+        end_active=True,
+    )
     generated = generate_palette(params)
     ts_str = palette_to_typescript_color_array_str(
         generated.colors, palette_format=PaletteFormat.RGB
@@ -133,7 +152,13 @@ def test_typescript_export_rgb_format():
 
 
 def test_typescript_export_oklch_format():
-    params = PaletteParams(start_color="#000000", end_color="#ffffff", steepness=1.0)
+    params = PaletteParams(
+        start=hex_to_oklch("#000000"),
+        end=hex_to_oklch("#ffffff"),
+        steepness=1.0,
+        start_active=True,
+        end_active=True,
+    )
     generated = generate_palette(params)
     ts_str = palette_to_typescript_color_array_str(
         generated.colors, palette_format=PaletteFormat.OKLCH
@@ -150,10 +175,24 @@ def test_hex_to_oklch_round_trip_preserves_value():
     assert reconstructed.lower() == original.lower()
 
 
+def test_hex_round_trip_neutral_preserves_zero_hue():
+    neutral_oklch = (0.75, 0.0, 180.0)
+    hex_color = oklch_to_hex(neutral_oklch)
+    round_trip = hex_to_oklch(hex_color)
+    assert round_trip[1] == 0.0
+    assert round_trip[2] == 0.0
+
+
 def test_oklch_interpolation_is_monotonic_in_lightness():
-    params = PaletteParams(start_color="#111111", end_color="#f5f5f5", steepness=1.0)
+    params = PaletteParams(
+        start=hex_to_oklch("#111111"),
+        end=hex_to_oklch("#f5f5f5"),
+        steepness=1.0,
+        start_active=True,
+        end_active=True,
+    )
     generated = generate_palette(params)
-    lightness_values = [hex_to_oklch(color)[0] for color in generated.colors.values()]
+    lightness_values = [color[0] for color in generated.colors.values()]
     assert all(
         lightness_values[i] <= lightness_values[i + 1] + 1e-3
         for i in range(len(lightness_values) - 1)
@@ -174,7 +213,7 @@ def test_enforce_gamut_reduces_high_chroma():
 
 
 def test_format_palette_export_defaults_are_semicolon_unquoted():
-    palette = {50: "#f8fafc"}
+    palette = {50: hex_to_oklch("#f8fafc")}
     result = format_palette_export(
         palette,
         PaletteFormat.HEX,
@@ -189,7 +228,10 @@ def test_format_palette_export_defaults_are_semicolon_unquoted():
 
 
 def test_format_palette_export_with_prefix_and_comma():
-    palette = {50: "#f8fafc", 900: "#020617"}
+    palette = {
+        50: hex_to_oklch("#f8fafc"),
+        900: hex_to_oklch("#020617"),
+    }
     options = PaletteExportOptions(
         key_prefix="--color-", line_terminator=",", wrap_values_in_quotes=True
     )
@@ -201,7 +243,10 @@ def test_format_palette_export_with_prefix_and_comma():
 
 
 def test_format_palette_export_no_quotes_and_semicolon():
-    palette = {50: "#f8fafc", 900: "#020617"}
+    palette = {
+        50: hex_to_oklch("#f8fafc"),
+        900: hex_to_oklch("#020617"),
+    }
     options = PaletteExportOptions(
         key_prefix="--color-", line_terminator=";", wrap_values_in_quotes=False
     )
@@ -212,7 +257,13 @@ def test_format_palette_export_no_quotes_and_semicolon():
 
 
 def test_format_palette_export_default_options_match_legacy():
-    params = PaletteParams(start_color="#000000", end_color="#ffffff", steepness=1.0)
+    params = PaletteParams(
+        start=hex_to_oklch("#000000"),
+        end=hex_to_oklch("#ffffff"),
+        steepness=1.0,
+        start_active=True,
+        end_active=True,
+    )
     generated = generate_palette(params)
     legacy_output = palette_to_typescript_color_array_str(generated.colors)
 
