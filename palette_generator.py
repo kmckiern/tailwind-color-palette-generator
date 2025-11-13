@@ -18,6 +18,21 @@ from color_spaces import (
     toe,
     toe_inv,
 )
+from defaults import (
+    DEFAULT_CHROMA_BOUNDS,
+    DEFAULT_END_COLOR_OKLCH,
+    DEFAULT_ENFORCE_MINIMUMS,
+    DEFAULT_EXPORT_FORMAT,
+    DEFAULT_EXPORT_KEY_PREFIX,
+    DEFAULT_EXPORT_LINE_TERMINATOR,
+    DEFAULT_EXPORT_WRAP_QUOTES,
+    DEFAULT_LIGHTNESS_BOUNDS,
+    DEFAULT_MIDDLE_COLOR_OKLCH,
+    DEFAULT_MIDDLE_POSITION,
+    DEFAULT_START_COLOR_OKLCH,
+    DEFAULT_STEEPNESS,
+    DEFAULT_UI_ENFORCE_MINIMUMS,
+)
 
 pyperclip: Optional[Any]
 try:
@@ -33,21 +48,28 @@ AUTO_DERIVATION_RATIO = 0.65
 class PaletteParams:
     start_color: Optional[str] = None
     end_color: Optional[str] = None
-    steepness: float = 1.0
+    steepness: float = DEFAULT_STEEPNESS
     middle_color: Optional[str] = None
-    middle_position: float = 0.5
+    middle_position: float = DEFAULT_MIDDLE_POSITION
     start_oklch: Optional[OklchColor] = None
     end_oklch: Optional[OklchColor] = None
     middle_oklch: Optional[OklchColor] = None
-    min_lightness: float = 0.05
-    max_lightness: float = 0.98
-    min_chroma: float = 0.05
-    max_chroma: float = 0.37
+    min_lightness: float = DEFAULT_LIGHTNESS_BOUNDS[0]
+    max_lightness: float = DEFAULT_LIGHTNESS_BOUNDS[1]
+    min_chroma: float = DEFAULT_CHROMA_BOUNDS[0]
+    max_chroma: float = DEFAULT_CHROMA_BOUNDS[1]
     gamut_space: str = "srgb"
-    enforce_minimums: bool = False
+    enforce_minimums: bool = DEFAULT_ENFORCE_MINIMUMS
     start_active: bool = False
     middle_active: bool = False
     end_active: bool = False
+
+
+@dataclass
+class PaletteExportOptions:
+    key_prefix: str = DEFAULT_EXPORT_KEY_PREFIX
+    line_terminator: str = DEFAULT_EXPORT_LINE_TERMINATOR
+    wrap_values_in_quotes: bool = DEFAULT_EXPORT_WRAP_QUOTES
 
 
 @dataclass
@@ -271,16 +293,16 @@ def generate_palette(params: PaletteParams) -> GeneratedPalette:
             derived_end = True
     else:
         if not start_color:
-            start_color = "#ffffff"
+            start_color = oklch_to_hex(DEFAULT_START_COLOR_OKLCH)
             if start_active:
                 warnings.append(
-                    "Start color fell back to #ffffff because it was cleared."
+                    f"Start color fell back to {start_color} because it was cleared."
                 )
         if not end_color:
-            end_color = "#000000"
+            end_color = oklch_to_hex(DEFAULT_END_COLOR_OKLCH)
             if end_active:
                 warnings.append(
-                    "End color fell back to #000000 because it was cleared."
+                    f"End color fell back to {end_color} because it was cleared."
                 )
 
     if start_color is None or end_color is None:
@@ -386,15 +408,37 @@ def generate_palette(params: PaletteParams) -> GeneratedPalette:
     )
 
 
+def format_palette_export(
+    palette: Dict[int, str],
+    palette_format: PaletteFormat,
+    options: PaletteExportOptions,
+) -> str:
+    lines: List[str] = []
+    for shade, color in palette.items():
+        formatted_value = format_hex_color(color, palette_format)
+        if options.wrap_values_in_quotes:
+            value_str = f'"{formatted_value}"'
+        else:
+            value_str = formatted_value
+
+        key_str = f"{options.key_prefix}{shade}"
+        if " " in key_str or "-" in key_str:  # Basic check if key needs quotes
+            key_str = f'"{key_str}"'
+
+        lines.append(f"    {key_str}: {value_str}{options.line_terminator}")
+
+    return "{\n" + "\n".join(lines) + "\n}"
+
+
 def palette_to_typescript_color_array_str(
     palette: Dict[int, str], palette_format: PaletteFormat = PaletteFormat.HEX
 ) -> str:
-    ts_color_array_str = "{\n"
-    for shade, color in palette.items():
-        formatted = format_hex_color(color, palette_format)
-        ts_color_array_str += f'    {shade}: "{formatted}",\n'
-    ts_color_array_str += "}"
-    return ts_color_array_str
+    # Maintain backward compatibility for tests.
+    return format_palette_export(
+        palette,
+        palette_format,
+        PaletteExportOptions(line_terminator=",", wrap_values_in_quotes=True),
+    )
 
 
 def perceptual_color_editor(
@@ -527,10 +571,10 @@ def perceptual_color_editor(
 
 
 def render_anchor(
-    label: str, color_key: str, default_hex: str
+    label: str, color_key: str, default_oklch: OklchColor
 ) -> Tuple[Optional[str], Optional[OklchColor], bool]:
     if color_key not in st.session_state:
-        st.session_state[color_key] = default_hex
+        st.session_state[color_key] = oklch_to_hex(default_oklch)
     if f"{color_key}_active" not in st.session_state:
         st.session_state[f"{color_key}_active"] = False
 
@@ -552,16 +596,16 @@ def palette_parameter_component() -> PaletteParams:
     st.header("Parameters")
     st.subheader("Anchors")
     start_color_value, start_oklch, start_active = render_anchor(
-        "Start", "start_color", "#fafafa"
+        "Start", "start_color", DEFAULT_START_COLOR_OKLCH
     )
     middle_color_value, middle_oklch, middle_active = render_anchor(
-        "Middle", "middle_color", "#737373"
+        "Middle", "middle_color", DEFAULT_MIDDLE_COLOR_OKLCH
     )
 
-    middle_position = 0.5
+    middle_position = DEFAULT_MIDDLE_POSITION
 
     end_color_value, end_oklch, end_active = render_anchor(
-        "End", "end_color", "#0a0a0a"
+        "End", "end_color", DEFAULT_END_COLOR_OKLCH
     )
 
     st.divider()
@@ -571,7 +615,7 @@ def palette_parameter_component() -> PaletteParams:
         label="Steepness",
         min_value=1.0,
         max_value=16.0,
-        value=st.session_state.get("steepness", 1.0),
+        value=st.session_state.get("steepness", DEFAULT_STEEPNESS),
         step=0.5,
         key="steepness",
     )
@@ -586,7 +630,7 @@ def palette_parameter_component() -> PaletteParams:
         label="Allowed Lightness",
         min_value=0.0,
         max_value=1.0,
-        value=st.session_state.get("oklch_lightness_bounds", (0.05, 0.98)),
+        value=st.session_state.get("oklch_lightness_bounds", DEFAULT_LIGHTNESS_BOUNDS),
         step=0.01,
         key="oklch_lightness_bounds",
     )
@@ -594,14 +638,16 @@ def palette_parameter_component() -> PaletteParams:
         label="Allowed Chroma",
         min_value=0.0,
         max_value=0.45,
-        value=st.session_state.get("oklch_chroma_bounds", (0.05, 0.37)),
+        value=st.session_state.get("oklch_chroma_bounds", DEFAULT_CHROMA_BOUNDS),
         step=0.01,
         key="oklch_chroma_bounds",
     )
 
     enforce_minimums = st.checkbox(
         label="Enforce safe-range floors",
-        value=st.session_state.get("oklch_enforce_minimums", True),
+        value=st.session_state.get(
+            "oklch_enforce_minimums", DEFAULT_UI_ENFORCE_MINIMUMS
+        ),
         key="oklch_enforce_minimums",
         help="Raise shades that drift below the lightness/chroma bounds to avoid muddy ramps.",
     )
@@ -640,6 +686,37 @@ def palette_component(generated_palette: GeneratedPalette) -> None:
         for shade, color in palette.items():
             st.session_state[f"color_{shade}"] = color
 
+    with st.expander("Export Options", expanded=False):
+        if "palette_format" not in st.session_state:
+            st.session_state["palette_format"] = PaletteFormat(DEFAULT_EXPORT_FORMAT)
+        if "export_line_terminator" not in st.session_state:
+            st.session_state["export_line_terminator"] = DEFAULT_EXPORT_LINE_TERMINATOR
+        if "export_wrap_quotes" not in st.session_state:
+            st.session_state["export_wrap_quotes"] = DEFAULT_EXPORT_WRAP_QUOTES
+        if "export_key_prefix" not in st.session_state:
+            st.session_state["export_key_prefix"] = DEFAULT_EXPORT_KEY_PREFIX
+
+        key_prefix = st.text_input(
+            "Key Prefix",
+            key="export_key_prefix",
+            help="Prepended before each shade number.",
+        )
+        line_terminator = st.text_input(
+            "Line Terminator",
+            key="export_line_terminator",
+            help="Appended after each color (e.g., ;, ,, blank).",
+        )
+        wrap_values_in_quotes = st.checkbox(
+            "Wrap Values In Quotes",
+            key="export_wrap_quotes",
+        )
+        palette_format = st.selectbox(
+            label="Format",
+            options=list(PaletteFormat),
+            format_func=lambda opt: PALETTE_FORMAT_LABELS[opt],
+            key="palette_format",
+        )
+
     cols = st.columns(len(palette))
     for (shade, color), col in zip(palette.items(), cols):
         col.color_picker(label=f"{shade}", key=f"color_{shade}")
@@ -647,18 +724,14 @@ def palette_component(generated_palette: GeneratedPalette) -> None:
         if note:
             col.caption("⚠️")
 
-    if "palette_format" not in st.session_state:
-        st.session_state["palette_format"] = PaletteFormat.OKLCH
-
-    palette_format = st.selectbox(
-        label="Format",
-        options=list(PaletteFormat),
-        format_func=lambda opt: PALETTE_FORMAT_LABELS[opt],
-        key="palette_format",
+    export_options = PaletteExportOptions(
+        key_prefix=key_prefix,
+        line_terminator=line_terminator,
+        wrap_values_in_quotes=wrap_values_in_quotes,
     )
 
-    ts_color_array_str = palette_to_typescript_color_array_str(
-        palette=palette, palette_format=palette_format
+    ts_color_array_str = format_palette_export(
+        palette=palette, palette_format=palette_format, options=export_options
     )
     st.code(body=ts_color_array_str, language="typescript")
 
