@@ -132,6 +132,17 @@ def test_typescript_export_rgb_format():
     assert "#" not in ts_str
 
 
+def test_typescript_export_oklch_format():
+    params = PaletteParams(start_color="#000000", end_color="#ffffff", steepness=1.0)
+    generated = generate_palette(params)
+    ts_str = palette_to_typescript_color_array_str(
+        generated.colors, palette_format=PaletteFormat.OKLCH
+    )
+
+    assert "oklch(" in ts_str
+    assert "#" not in ts_str
+
+
 def test_hex_to_oklch_round_trip_preserves_value():
     original = "#4a83ff"
     oklch = hex_to_oklch(original)

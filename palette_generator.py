@@ -62,11 +62,13 @@ class GeneratedPalette:
 class PaletteFormat(str, Enum):
     HEX = "hex"
     RGB = "rgb"
+    OKLCH = "oklch"
 
 
 PALETTE_FORMAT_LABELS = {
     PaletteFormat.HEX: "Hex (#RRGGBB)",
     PaletteFormat.RGB: "RGB (r, g, b)",
+    PaletteFormat.OKLCH: "OKLCH (L, C, H)",
 }
 
 
@@ -74,6 +76,9 @@ def format_hex_color(hex_color: str, palette_format: PaletteFormat) -> str:
     if palette_format == PaletteFormat.RGB:
         r, g, b = hex_to_rgb(hex_color)
         return f"rgb({r}, {g}, {b})"
+    if palette_format == PaletteFormat.OKLCH:
+        l, c, h = hex_to_oklch(hex_color)
+        return f"oklch({l:.4f}, {c:.4f}, {h:.2f})"
     return hex_color
 
 
@@ -638,6 +643,9 @@ def palette_component(generated_palette: GeneratedPalette) -> None:
         note = generated_palette.gamut_notes.get(shade)
         if note:
             col.caption("⚠️")
+
+    if "palette_format" not in st.session_state:
+        st.session_state["palette_format"] = PaletteFormat.OKLCH
 
     palette_format = st.selectbox(
         label="Format",
