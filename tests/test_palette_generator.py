@@ -1,11 +1,5 @@
-import sys
-from pathlib import Path
-
-ROOT = Path(__file__).resolve().parents[1]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
-
-from palette_generator import (  # noqa: E402
+from color_spaces import enforce_gamut, hex_to_oklch, oklch_to_hex
+from palette_generator import (
     AUTO_DERIVATION_RATIO,
     TAILWIND_SHADES,
     PaletteFormat,
@@ -129,3 +123,44 @@ def test_typescript_export_rgb_format():
 
     assert "rgb(0, 0, 0)" in ts_str
     assert "#" not in ts_str
+
+
+def test_typescript_export_oklch_format():
+    params = PaletteParams(start_color="#000000", end_color="#ffffff", steepness=1.0)
+    generated = generate_palette(params)
+    ts_str = palette_to_typescript_color_array_str(
+        generated.colors, palette_format=PaletteFormat.OKLCH
+    )
+
+    assert "oklch(" in ts_str
+    assert "#" not in ts_str
+
+
+def test_hex_to_oklch_round_trip_preserves_value():
+    original = "#4a83ff"
+    oklch = hex_to_oklch(original)
+    reconstructed = oklch_to_hex(oklch)
+    assert reconstructed.lower() == original.lower()
+
+
+def test_oklch_interpolation_is_monotonic_in_lightness():
+    params = PaletteParams(start_color="#111111", end_color="#f5f5f5", steepness=1.0)
+    generated = generate_palette(params)
+    lightness_values = [hex_to_oklch(color)[0] for color in generated.colors.values()]
+    assert all(
+        lightness_values[i] <= lightness_values[i + 1] + 1e-3
+        for i in range(len(lightness_values) - 1)
+    )
+
+
+def test_enforce_gamut_reduces_high_chroma():
+    saturated = (0.7, 0.6, 40.0)
+    result = enforce_gamut(
+        saturated,
+        min_lightness=0.05,
+        max_lightness=0.98,
+        min_chroma=0.0,
+        max_chroma=0.6,
+    )
+    assert result.chroma_after <= result.chroma_before
+    assert result.clipped is True
