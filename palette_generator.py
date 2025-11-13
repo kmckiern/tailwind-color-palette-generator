@@ -11,12 +11,26 @@ from color_spaces import (
     OklchColor,
     enforce_gamut,
     hex_to_oklch,
-    hex_to_rgb,
     normalize_hue,
     oklch_to_hex,
-    rgb_to_hex,
+    oklch_to_rgb,
     toe,
     toe_inv,
+)
+from defaults import (
+    DEFAULT_CHROMA_BOUNDS,
+    DEFAULT_END_COLOR_OKLCH,
+    DEFAULT_ENFORCE_MINIMUMS,
+    DEFAULT_EXPORT_FORMAT,
+    DEFAULT_EXPORT_KEY_PREFIX,
+    DEFAULT_EXPORT_LINE_TERMINATOR,
+    DEFAULT_EXPORT_WRAP_QUOTES,
+    DEFAULT_LIGHTNESS_BOUNDS,
+    DEFAULT_MIDDLE_COLOR_OKLCH,
+    DEFAULT_MIDDLE_POSITION,
+    DEFAULT_START_COLOR_OKLCH,
+    DEFAULT_STEEPNESS,
+    DEFAULT_UI_ENFORCE_MINIMUMS,
 )
 
 pyperclip: Optional[Any]
@@ -31,20 +45,17 @@ AUTO_DERIVATION_RATIO = 0.65
 
 @dataclass
 class PaletteParams:
-    start_color: Optional[str] = None
-    end_color: Optional[str] = None
-    steepness: float = 1.0
-    middle_color: Optional[str] = None
-    middle_position: float = 0.5
-    start_oklch: Optional[OklchColor] = None
-    end_oklch: Optional[OklchColor] = None
-    middle_oklch: Optional[OklchColor] = None
-    min_lightness: float = 0.05
-    max_lightness: float = 0.98
-    min_chroma: float = 0.05
-    max_chroma: float = 0.37
+    start: Optional[OklchColor] = None
+    end: Optional[OklchColor] = None
+    steepness: float = DEFAULT_STEEPNESS
+    middle: Optional[OklchColor] = None
+    middle_position: float = DEFAULT_MIDDLE_POSITION
+    min_lightness: float = DEFAULT_LIGHTNESS_BOUNDS[0]
+    max_lightness: float = DEFAULT_LIGHTNESS_BOUNDS[1]
+    min_chroma: float = DEFAULT_CHROMA_BOUNDS[0]
+    max_chroma: float = DEFAULT_CHROMA_BOUNDS[1]
     gamut_space: str = "srgb"
-    enforce_minimums: bool = False
+    enforce_minimums: bool = DEFAULT_ENFORCE_MINIMUMS
     start_active: bool = False
     middle_active: bool = False
     end_active: bool = False
@@ -52,18 +63,28 @@ class PaletteParams:
 
 @dataclass
 class PaletteExportOptions:
-    key_prefix: str = ""
-    line_terminator: str = ";"
-    wrap_values_in_quotes: bool = False
+    key_prefix: str = DEFAULT_EXPORT_KEY_PREFIX
+    line_terminator: str = DEFAULT_EXPORT_LINE_TERMINATOR
+    wrap_values_in_quotes: bool = DEFAULT_EXPORT_WRAP_QUOTES
 
 
 @dataclass
 class GeneratedPalette:
-    colors: Dict[int, str]
+    colors: Dict[int, OklchColor]
     auto_labels: Dict[int, str]
     warnings: List[str] = field(default_factory=list)
     middle_shade: Optional[int] = None
     gamut_notes: Dict[int, str] = field(default_factory=dict)
+    _hex_cache: Dict[int, str] = field(
+        default_factory=dict, init=False, repr=False, compare=False
+    )
+
+    def hex_colors(self) -> Dict[int, str]:
+        if not self._hex_cache:
+            self._hex_cache = {
+                shade: oklch_to_hex(color) for shade, color in self.colors.items()
+            }
+        return self._hex_cache
 
 
 class PaletteFormat(str, Enum):
@@ -79,43 +100,53 @@ PALETTE_FORMAT_LABELS = {
 }
 
 
-def format_hex_color(hex_color: str, palette_format: PaletteFormat) -> str:
+def format_oklch_color(oklch_color: OklchColor, palette_format: PaletteFormat) -> str:
     if palette_format == PaletteFormat.RGB:
-        r, g, b = hex_to_rgb(hex_color)
+        r, g, b = oklch_to_rgb(oklch_color)
         return f"rgb({r}, {g}, {b})"
     if palette_format == PaletteFormat.OKLCH:
-        lightness, chroma, hue = hex_to_oklch(hex_color)
+        lightness, chroma, hue = oklch_color
         return f"oklch({lightness:.4f}, {chroma:.4f}, {hue:.2f})"
-    return hex_color
+    return oklch_to_hex(oklch_color)
 
 
-def clamp_channel(value: float) -> int:
-    return max(0, min(255, int(round(value))))
+def _clamp01(value: float) -> float:
+    return max(0.0, min(1.0, value))
 
 
-def mix_toward(
-    rgb: Tuple[int, int, int], target: Tuple[int, int, int], ratio: float
-) -> Tuple[int, int, int]:
-    r = clamp_channel(rgb[0] + (target[0] - rgb[0]) * ratio)
-    g = clamp_channel(rgb[1] + (target[1] - rgb[1]) * ratio)
-    b = clamp_channel(rgb[2] + (target[2] - rgb[2]) * ratio)
-    return (r, g, b)
+def mirror_oklch(middle: OklchColor, known: OklchColor) -> OklchColor:
+    delta_lightness = middle[0] - known[0]
+    delta_chroma = middle[1] - known[1]
+    hue_delta = ((middle[2] - known[2] + 180.0) % 360.0) - 180.0
+    mirrored_lightness = _clamp01(middle[0] + delta_lightness)
+    mirrored_chroma = max(0.0, middle[1] + delta_chroma)
+    mirrored_hue = normalize_hue(middle[2] + hue_delta)
+    return (mirrored_lightness, mirrored_chroma, mirrored_hue)
 
 
-def derive_endpoint_from_middle(
-    middle_color: str, known_color: Optional[str], target: str
-) -> str:
-    middle_rgb = hex_to_rgb(hex_color=middle_color)
-    if known_color:
-        known_rgb = hex_to_rgb(hex_color=known_color)
-        r = clamp_channel(2 * middle_rgb[0] - known_rgb[0])
-        g = clamp_channel(2 * middle_rgb[1] - known_rgb[1])
-        b = clamp_channel(2 * middle_rgb[2] - known_rgb[2])
-        return rgb_to_hex(rgb=(r, g, b))
+def mix_oklch_toward_extreme(
+    color: OklchColor, *, target_lightness: float
+) -> OklchColor:
+    ratio = AUTO_DERIVATION_RATIO
+    target = (target_lightness, 0.0, color[2])
+    lightness = _clamp01(color[0] + (target[0] - color[0]) * ratio)
+    chroma = max(0.0, color[1] + (target[1] - color[1]) * ratio)
+    # Maintain hue when targeting neutrals (chroma = 0).
+    hue = color[2]
+    return (lightness, chroma, hue)
 
-    bound_rgb = (255, 255, 255) if target == "start" else (0, 0, 0)
-    derived = mix_toward(rgb=middle_rgb, target=bound_rgb, ratio=AUTO_DERIVATION_RATIO)
-    return rgb_to_hex(rgb=derived)
+
+def derive_oklch_from_middle(
+    *,
+    middle: OklchColor,
+    known: Optional[OklchColor],
+    target: str,
+) -> OklchColor:
+    if known is not None:
+        return mirror_oklch(middle, known)
+    if target == "start":
+        return mix_oklch_toward_extreme(middle, target_lightness=1.0)
+    return mix_oklch_toward_extreme(middle, target_lightness=0.0)
 
 
 def linspace(start: float, stop: float, num: int) -> List[float]:
@@ -135,13 +166,12 @@ def normalize_sigmoid(x: float, steepness: float) -> float:
 
 def _sync_oklch_editor_state(
     color_key: str,
-    hex_value: str,
+    oklch: OklchColor,
     *,
     force: bool = False,
 ) -> None:
-    base_oklch = hex_to_oklch(hex_value)
     snapshot_key = f"{color_key}_hex_snapshot"
-    st.session_state[snapshot_key] = hex_value
+    st.session_state[snapshot_key] = oklch_to_hex(oklch)
 
     l_state_key = f"{color_key}_oklch_l_state"
     c_state_key = f"{color_key}_oklch_c_state"
@@ -151,13 +181,13 @@ def _sync_oklch_editor_state(
     h_snapshot_key = f"{color_key}_oklch_h_snapshot"
 
     if force or l_state_key not in st.session_state:
-        st.session_state[l_state_key] = float(toe(base_oklch[0]))
+        st.session_state[l_state_key] = float(toe(oklch[0]))
     st.session_state[l_snapshot_key] = float(st.session_state[l_state_key])
     if force or c_state_key not in st.session_state:
-        st.session_state[c_state_key] = float(base_oklch[1])
+        st.session_state[c_state_key] = float(oklch[1])
     st.session_state[c_snapshot_key] = float(st.session_state[c_state_key])
     if force or h_state_key not in st.session_state:
-        st.session_state[h_state_key] = float(base_oklch[2])
+        st.session_state[h_state_key] = float(oklch[2])
     st.session_state[h_snapshot_key] = float(st.session_state[h_state_key])
 
 
@@ -240,75 +270,51 @@ def generate_palette(params: PaletteParams) -> GeneratedPalette:
     auto_labels: Dict[int, str] = {}
     gamut_notes: Dict[int, str] = {}
 
-    start_color = params.start_color
-    end_color = params.end_color
-    middle_color = params.middle_color
     start_active = params.start_active
+    middle_active = params.middle_active
     end_active = params.end_active
-    record_gamut_warnings = (
-        params.start_active or params.middle_active or params.end_active
-    )
+    start = params.start if start_active else None
+    end = params.end if end_active else None
+    middle = params.middle if middle_active else None
+    record_gamut_warnings = start_active or middle_active or end_active
     derived_start = False
     derived_end = False
     middle_shade: Optional[int] = None
 
-    if middle_color:
-        if not start_color and not end_color:
-            start_color = derive_endpoint_from_middle(
-                middle_color=middle_color, known_color=None, target="start"
-            )
-            end_color = derive_endpoint_from_middle(
-                middle_color=middle_color, known_color=None, target="end"
-            )
+    if middle:
+        if start is None and end is None:
+            start = derive_oklch_from_middle(middle=middle, known=None, target="start")
+            end = derive_oklch_from_middle(middle=middle, known=None, target="end")
             derived_start = True
             derived_end = True
-        elif not start_color:
-            start_color = derive_endpoint_from_middle(
-                middle_color=middle_color,
-                known_color=params.end_color,
-                target="start",
-            )
+        elif start is None:
+            start = derive_oklch_from_middle(middle=middle, known=end, target="start")
             derived_start = True
-        elif not end_color:
-            end_color = derive_endpoint_from_middle(
-                middle_color=middle_color,
-                known_color=params.start_color,
-                target="end",
-            )
+        elif end is None:
+            end = derive_oklch_from_middle(middle=middle, known=start, target="end")
             derived_end = True
-    else:
-        if not start_color:
-            start_color = "#ffffff"
-            if start_active:
-                warnings.append(
-                    "Start color fell back to #ffffff because it was cleared."
-                )
-        if not end_color:
-            end_color = "#000000"
-            if end_active:
-                warnings.append(
-                    "End color fell back to #000000 because it was cleared."
-                )
 
-    if start_color is None or end_color is None:
-        raise ValueError(
-            "Start and end colors must be resolved before generating a palette."
-        )
+    if start is None:
+        start = DEFAULT_START_COLOR_OKLCH
+        if start_active:
+            warnings.append(
+                f"Start color fell back to {oklch_to_hex(start)} because it was cleared."
+            )
+    if end is None:
+        end = DEFAULT_END_COLOR_OKLCH
+        if end_active:
+            warnings.append(
+                f"End color fell back to {oklch_to_hex(end)} because it was cleared."
+            )
 
     if derived_start:
         auto_labels[TAILWIND_SHADES[0]] = "auto"
     if derived_end:
         auto_labels[TAILWIND_SHADES[-1]] = "auto"
 
-    palette: Dict[int, str] = {}
+    palette: Dict[int, OklchColor] = {}
 
-    start_oklch = params.start_oklch or hex_to_oklch(start_color)
-    end_oklch = params.end_oklch or hex_to_oklch(end_color)
-    middle_oklch = None
-    if middle_color:
-        middle_oklch = params.middle_oklch or hex_to_oklch(middle_color)
-
-    if middle_color and middle_oklch:
+    if middle:
         idx, diff = nearest_shade_index(position=params.middle_position)
         middle_shade = TAILWIND_SHADES[idx]
         if diff > 1e-6:
@@ -325,16 +331,16 @@ def generate_palette(params: PaletteParams) -> GeneratedPalette:
 
         for i, shade in enumerate(lower_shades):
             if shade == middle_shade:
-                palette[shade] = middle_color
+                palette[shade] = middle
                 continue
             factor = i / lower_denominator
             oklch_value = interpolate_oklch(
-                color1=start_oklch,
-                color2=middle_oklch,
+                color1=start,
+                color2=middle,
                 factor=factor,
                 steepness=params.steepness,
             )
-            hex_value, _ = apply_gamut_constraints(
+            _, adjusted_oklch = apply_gamut_constraints(
                 shade=shade,
                 oklch_color=oklch_value,
                 params=params,
@@ -342,21 +348,21 @@ def generate_palette(params: PaletteParams) -> GeneratedPalette:
                 gamut_notes=gamut_notes,
                 record_warnings=record_gamut_warnings,
             )
-            palette[shade] = hex_value
+            palette[shade] = adjusted_oklch
 
         for i, shade in enumerate(upper_shades):
             if shade == middle_shade:
                 if shade not in palette:
-                    palette[shade] = middle_color
+                    palette[shade] = middle
                 continue
             factor = i / upper_denominator
             oklch_value = interpolate_oklch(
-                color1=middle_oklch,
-                color2=end_oklch,
+                color1=middle,
+                color2=end,
                 factor=factor,
                 steepness=params.steepness,
             )
-            hex_value, _ = apply_gamut_constraints(
+            _, adjusted_oklch = apply_gamut_constraints(
                 shade=shade,
                 oklch_color=oklch_value,
                 params=params,
@@ -364,17 +370,17 @@ def generate_palette(params: PaletteParams) -> GeneratedPalette:
                 gamut_notes=gamut_notes,
                 record_warnings=record_gamut_warnings,
             )
-            palette[shade] = hex_value
+            palette[shade] = adjusted_oklch
     else:
         for i, shade in enumerate(TAILWIND_SHADES):
             factor = i / (len(TAILWIND_SHADES) - 1)
             oklch_value = interpolate_oklch(
-                color1=start_oklch,
-                color2=end_oklch,
+                color1=start,
+                color2=end,
                 factor=factor,
                 steepness=params.steepness,
             )
-            hex_value, _ = apply_gamut_constraints(
+            _, adjusted_oklch = apply_gamut_constraints(
                 shade=shade,
                 oklch_color=oklch_value,
                 params=params,
@@ -382,7 +388,7 @@ def generate_palette(params: PaletteParams) -> GeneratedPalette:
                 gamut_notes=gamut_notes,
                 record_warnings=record_gamut_warnings,
             )
-            palette[shade] = hex_value
+            palette[shade] = adjusted_oklch
 
     return GeneratedPalette(
         colors=palette,
@@ -394,13 +400,13 @@ def generate_palette(params: PaletteParams) -> GeneratedPalette:
 
 
 def format_palette_export(
-    palette: Dict[int, str],
+    palette: Dict[int, OklchColor],
     palette_format: PaletteFormat,
     options: PaletteExportOptions,
 ) -> str:
     lines: List[str] = []
     for shade, color in palette.items():
-        formatted_value = format_hex_color(color, palette_format)
+        formatted_value = format_oklch_color(color, palette_format)
         if options.wrap_values_in_quotes:
             value_str = f'"{formatted_value}"'
         else:
@@ -416,7 +422,7 @@ def format_palette_export(
 
 
 def palette_to_typescript_color_array_str(
-    palette: Dict[int, str], palette_format: PaletteFormat = PaletteFormat.HEX
+    palette: Dict[int, OklchColor], palette_format: PaletteFormat = PaletteFormat.HEX
 ) -> str:
     # Maintain backward compatibility for tests.
     return format_palette_export(
@@ -426,19 +432,24 @@ def palette_to_typescript_color_array_str(
     )
 
 
+def _ensure_oklch_state(color_key: str, default: OklchColor) -> None:
+    hex_key = f"{color_key}_hex"
+    if hex_key not in st.session_state:
+        st.session_state[hex_key] = oklch_to_hex(default)
+        _sync_oklch_editor_state(color_key, default, force=True)
+
+
 def perceptual_color_editor(
     *,
     label: str,
     color_key: str,
     color_placeholder: Any,
-) -> Tuple[str, Optional[OklchColor]]:
-    pending_key = f"{color_key}_pending_hex"
-    if pending_key in st.session_state:
-        st.session_state[color_key] = st.session_state[pending_key]
-        del st.session_state[pending_key]
+    default: OklchColor,
+) -> Optional[OklchColor]:
+    _ensure_oklch_state(color_key, default)
 
-    base_hex = st.session_state[color_key]
-    snapshot_key = f"{color_key}_hex_snapshot"
+    hex_key = f"{color_key}_hex"
+    base_hex = st.session_state[hex_key]
     l_state_key = f"{color_key}_oklch_l_state"
     c_state_key = f"{color_key}_oklch_c_state"
     h_state_key = f"{color_key}_oklch_h_state"
@@ -448,9 +459,7 @@ def perceptual_color_editor(
     picker_key = f"{color_key}_picker"
 
     if l_state_key not in st.session_state:
-        _sync_oklch_editor_state(color_key, base_hex)
-    elif st.session_state.get(snapshot_key) != base_hex:
-        _sync_oklch_editor_state(color_key, base_hex, force=True)
+        _sync_oklch_editor_state(color_key, hex_to_oklch(base_hex))
 
     slider_keys_ready = all(
         key in st.session_state for key in (l_state_key, c_state_key, h_state_key)
@@ -477,19 +486,18 @@ def perceptual_color_editor(
     )
 
     if slider_changed:
-        slider_oklch = (
+        slider_value = (
             max(0.0, min(1.0, toe_inv(float(st.session_state[l_state_key])))),
             float(st.session_state[c_state_key]),
             normalize_hue(float(st.session_state[h_state_key])),
         )
-        slider_hex = oklch_to_hex(slider_oklch)
+        slider_hex = oklch_to_hex(slider_value)
         st.session_state[l_snapshot_key] = float(st.session_state[l_state_key])
         st.session_state[c_snapshot_key] = float(st.session_state[c_state_key])
         st.session_state[h_snapshot_key] = float(st.session_state[h_state_key])
         if slider_hex != base_hex:
             base_hex = slider_hex
-            st.session_state[color_key] = slider_hex
-            st.session_state[snapshot_key] = slider_hex
+            st.session_state[hex_key] = slider_hex
             _sync_color_picker_widget(color_key, slider_hex, force=True)
 
     if picker_key not in st.session_state:
@@ -502,21 +510,19 @@ def perceptual_color_editor(
         value=st.session_state.get(picker_key, base_hex),
     )
 
-    if picker_value != st.session_state.get(color_key):
-        st.session_state[color_key] = picker_value
+    if picker_value != base_hex:
         base_hex = picker_value
-        _sync_oklch_editor_state(color_key, base_hex, force=True)
+        st.session_state[hex_key] = picker_value
+        _sync_oklch_editor_state(color_key, hex_to_oklch(base_hex), force=True)
         _request_streamlit_rerun()
-    elif st.session_state.get(snapshot_key) != base_hex:
-        _sync_oklch_editor_state(color_key, base_hex, force=True)
 
-    base_oklch = hex_to_oklch(base_hex)
+    base = hex_to_oklch(base_hex)
 
     l_display = st.slider(
         label="Lightness (perceptual)",
         min_value=0.0,
         max_value=1.0,
-        value=float(st.session_state.get(l_state_key, toe(base_oklch[0]))),
+        value=float(st.session_state.get(l_state_key, toe(base[0]))),
         key=l_state_key,
     )
     chroma_value = st.slider(
@@ -524,7 +530,7 @@ def perceptual_color_editor(
         min_value=0.0,
         max_value=0.45,
         step=0.005,
-        value=float(st.session_state.get(c_state_key, base_oklch[1])),
+        value=float(st.session_state.get(c_state_key, base[1])),
         key=c_state_key,
     )
     hue_value = st.slider(
@@ -532,7 +538,7 @@ def perceptual_color_editor(
         min_value=0.0,
         max_value=360.0,
         step=1.0,
-        value=float(st.session_state.get(h_state_key, base_oklch[2])),
+        value=float(st.session_state.get(h_state_key, base[2])),
         key=h_state_key,
     )
 
@@ -542,56 +548,51 @@ def perceptual_color_editor(
         chroma_value,
         normalize_hue(hue_value),
     )
-    perceptual_hex = oklch_to_hex(oklch_tuple)
+    if slider_changed:
+        new_hex = oklch_to_hex(oklch_tuple)
+        if new_hex != base_hex:
+            st.session_state[hex_key] = new_hex
+            _sync_color_picker_widget(color_key, new_hex, force=True)
+            _request_streamlit_rerun()
 
-    if slider_changed and perceptual_hex != base_hex:
-        st.session_state[color_key] = perceptual_hex
-        st.session_state[snapshot_key] = perceptual_hex
-        st.session_state[pending_key] = perceptual_hex
-        _sync_color_picker_widget(color_key, perceptual_hex, force=True)
-        base_hex = perceptual_hex
-        _request_streamlit_rerun()
-
-    return base_hex, oklch_tuple
+    return oklch_tuple
 
 
 def render_anchor(
-    label: str, color_key: str, default_hex: str
-) -> Tuple[Optional[str], Optional[OklchColor], bool]:
-    if color_key not in st.session_state:
-        st.session_state[color_key] = default_hex
+    label: str, color_key: str, default_oklch: OklchColor
+) -> Tuple[Optional[OklchColor], bool]:
+    _ensure_oklch_state(color_key, default_oklch)
     if f"{color_key}_active" not in st.session_state:
-        st.session_state[f"{color_key}_active"] = False
+        st.session_state[f"{color_key}_active"] = True
 
     st.markdown(f"**{label}**")
     active = st.checkbox("Active", key=f"{color_key}_active")
     if not active:
-        return None, None, False
+        return None, False
 
     color_placeholder = st.empty()
-    color_value, oklch = perceptual_color_editor(
+    oklch = perceptual_color_editor(
         label=label,
         color_key=color_key,
         color_placeholder=color_placeholder,
+        default=default_oklch,
     )
-    return color_value, oklch, True
+    return oklch, True
 
 
 def palette_parameter_component() -> PaletteParams:
     st.header("Parameters")
     st.subheader("Anchors")
-    start_color_value, start_oklch, start_active = render_anchor(
-        "Start", "start_color", "#fafafa"
+    start, start_active = render_anchor(
+        "Start", "start_color", DEFAULT_START_COLOR_OKLCH
     )
-    middle_color_value, middle_oklch, middle_active = render_anchor(
-        "Middle", "middle_color", "#737373"
+    middle, middle_active = render_anchor(
+        "Middle", "middle_color", DEFAULT_MIDDLE_COLOR_OKLCH
     )
 
-    middle_position = 0.5
+    middle_position = DEFAULT_MIDDLE_POSITION
 
-    end_color_value, end_oklch, end_active = render_anchor(
-        "End", "end_color", "#0a0a0a"
-    )
+    end, end_active = render_anchor("End", "end_color", DEFAULT_END_COLOR_OKLCH)
 
     st.divider()
     st.subheader("Interpolation Curve")
@@ -600,7 +601,7 @@ def palette_parameter_component() -> PaletteParams:
         label="Steepness",
         min_value=1.0,
         max_value=16.0,
-        value=st.session_state.get("steepness", 1.0),
+        value=st.session_state.get("steepness", DEFAULT_STEEPNESS),
         step=0.5,
         key="steepness",
     )
@@ -615,7 +616,7 @@ def palette_parameter_component() -> PaletteParams:
         label="Allowed Lightness",
         min_value=0.0,
         max_value=1.0,
-        value=st.session_state.get("oklch_lightness_bounds", (0.05, 0.98)),
+        value=st.session_state.get("oklch_lightness_bounds", DEFAULT_LIGHTNESS_BOUNDS),
         step=0.01,
         key="oklch_lightness_bounds",
     )
@@ -623,14 +624,16 @@ def palette_parameter_component() -> PaletteParams:
         label="Allowed Chroma",
         min_value=0.0,
         max_value=0.45,
-        value=st.session_state.get("oklch_chroma_bounds", (0.05, 0.37)),
+        value=st.session_state.get("oklch_chroma_bounds", DEFAULT_CHROMA_BOUNDS),
         step=0.01,
         key="oklch_chroma_bounds",
     )
 
     enforce_minimums = st.checkbox(
         label="Enforce safe-range floors",
-        value=st.session_state.get("oklch_enforce_minimums", True),
+        value=st.session_state.get(
+            "oklch_enforce_minimums", DEFAULT_UI_ENFORCE_MINIMUMS
+        ),
         key="oklch_enforce_minimums",
         help="Raise shades that drift below the lightness/chroma bounds to avoid muddy ramps.",
     )
@@ -639,14 +642,11 @@ def palette_parameter_component() -> PaletteParams:
     min_chroma, max_chroma = chroma_bounds
 
     return PaletteParams(
-        start_color=start_color_value,
-        end_color=end_color_value,
+        start=start if start_active else None,
+        end=end if end_active else None,
         steepness=steepness,
-        middle_color=middle_color_value,
+        middle=middle if middle_active else None,
         middle_position=middle_position,
-        start_oklch=start_oklch,
-        end_oklch=end_oklch,
-        middle_oklch=middle_oklch,
         min_lightness=min_lightness,
         max_lightness=max_lightness,
         min_chroma=min_chroma,
@@ -661,23 +661,24 @@ def palette_parameter_component() -> PaletteParams:
 def palette_component(generated_palette: GeneratedPalette) -> None:
     st.header("Palette")
 
-    palette = generated_palette.colors
+    palette_oklch = generated_palette.colors
+    hex_palette = generated_palette.hex_colors()
 
-    signature = tuple(palette.items())
+    signature = tuple(hex_palette.items())
     if st.session_state.get("palette_signature") != signature:
         st.session_state["palette_signature"] = signature
-        for shade, color in palette.items():
+        for shade, color in hex_palette.items():
             st.session_state[f"color_{shade}"] = color
 
     with st.expander("Export Options", expanded=False):
         if "palette_format" not in st.session_state:
-            st.session_state["palette_format"] = PaletteFormat.OKLCH
+            st.session_state["palette_format"] = PaletteFormat(DEFAULT_EXPORT_FORMAT)
         if "export_line_terminator" not in st.session_state:
-            st.session_state["export_line_terminator"] = ";"
+            st.session_state["export_line_terminator"] = DEFAULT_EXPORT_LINE_TERMINATOR
         if "export_wrap_quotes" not in st.session_state:
-            st.session_state["export_wrap_quotes"] = False
+            st.session_state["export_wrap_quotes"] = DEFAULT_EXPORT_WRAP_QUOTES
         if "export_key_prefix" not in st.session_state:
-            st.session_state["export_key_prefix"] = ""
+            st.session_state["export_key_prefix"] = DEFAULT_EXPORT_KEY_PREFIX
 
         key_prefix = st.text_input(
             "Key Prefix",
@@ -700,8 +701,8 @@ def palette_component(generated_palette: GeneratedPalette) -> None:
             key="palette_format",
         )
 
-    cols = st.columns(len(palette))
-    for (shade, color), col in zip(palette.items(), cols):
+    cols = st.columns(len(hex_palette))
+    for (shade, color), col in zip(hex_palette.items(), cols):
         col.color_picker(label=f"{shade}", key=f"color_{shade}")
         note = generated_palette.gamut_notes.get(shade)
         if note:
@@ -714,7 +715,9 @@ def palette_component(generated_palette: GeneratedPalette) -> None:
     )
 
     ts_color_array_str = format_palette_export(
-        palette=palette, palette_format=palette_format, options=export_options
+        palette=palette_oklch,
+        palette_format=palette_format,
+        options=export_options,
     )
     st.code(body=ts_color_array_str, language="typescript")
 

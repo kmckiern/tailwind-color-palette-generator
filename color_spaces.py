@@ -91,6 +91,10 @@ def rgb_to_oklch(rgb: RgbTuple) -> OklchColor:
     )
     L, a, b = _srgb_to_oklab(srgb)
     C = math.sqrt(a * a + b * b)
+    # Treat near-zero chroma values as neutrals so floating point jitter
+    # doesn't invent arbitrary hue angles when none exist.
+    if C < 1e-6:
+        return (L, 0.0, 0.0)
     h = math.degrees(math.atan2(b, a)) % 360
     return (L, C, h)
 
